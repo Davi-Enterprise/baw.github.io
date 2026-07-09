@@ -205,19 +205,9 @@ const WrestlerCard = ({ w, onOpen, i }) => (
     <img src={w.image} alt={w.name} className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110" />
     <div className="absolute inset-0 bg-gradient-to-t from-[#090909] via-[#090909]/40 to-transparent" />
     <div className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-500 bg-gradient-to-t from-[#6A0DAD]/40 to-transparent" />
-    {w.champion && (
-      <div className="absolute top-4 left-4 flex items-center gap-1.5 glass px-3 py-1 rounded-full">
-        <Trophy size={12} className="text-[#B15EFF]" />
-        <span className="font-oswald uppercase tracking-widest text-[10px] text-[#F5F5F5]">Champion</span>
-      </div>
-    )}
-    <div className="absolute bottom-0 left-0 right-0 p-6 translate-y-2 group-hover:translate-y-0 transition-transform duration-500">
-      <div className="font-oswald text-xs uppercase tracking-widest text-[#B15EFF]">"{w.nickname}"</div>
+    <div className="absolute bottom-0 left-0 right-0 p-6 translate-y-1 group-hover:translate-y-0 transition-transform duration-500">
+      {w.nickname ? <div className="font-oswald text-xs uppercase tracking-widest text-[#B15EFF]">"{w.nickname}"</div> : null}
       <h3 className="font-bebas text-3xl leading-none mt-1">{w.name}</h3>
-      <div className="mt-2 flex items-center gap-2 text-[#BDBDBD] text-xs font-poppins opacity-0 group-hover:opacity-100 transition-opacity duration-500">
-        <MapPin size={12} /> {w.hometown}
-        <span className="ml-auto flex items-center gap-1 text-[#B15EFF]">View Profile <ArrowRight size={12} /></span>
-      </div>
     </div>
   </motion.div>
 )
@@ -786,7 +776,7 @@ const TicketsPage = ({ selectedEvent, data }) => {
 
 /* ============================= ROSTER PAGE ============================= */
 const ROSTER_FILTERS = [
-  { k: 'all', l: 'All' }, { k: 'champions', l: 'Champions' }, { k: 'men', l: 'Men' },
+  { k: 'all', l: 'All' }, { k: 'men', l: 'Men' },
   { k: 'women', l: 'Women' }, { k: 'tag', l: 'Tag Teams' },
 ]
 const RosterPage = ({ data, onOpenWrestler }) => {
@@ -836,9 +826,10 @@ const WrestlerDetail = ({ w, data, nav, onOpenWrestler }) => {
   const stats = [
     { l: 'Height', v: w.height }, { l: 'Weight', v: w.weight },
     { l: 'Hometown', v: w.hometown }, { l: 'Debut', v: w.debut },
-  ]
+  ].filter((s) => s.v)
+  const hasDetails = !!(w.bio || w.finisher || (w.signatures && w.signatures.length))
   const others = data.wrestlers.filter((x) => x.id !== w.id).slice(0, 4)
-  const gallery = [HERO_SLIDES[0].img, HERO_SLIDES[1].img, HERO_SLIDES[2].img]
+  const gallery = [w.image, HERO_SLIDES[0].img, HERO_SLIDES[2].img]
   return (
     <div>
       <section className="relative pt-28 pb-16 overflow-hidden">
@@ -853,15 +844,9 @@ const WrestlerDetail = ({ w, data, nav, onOpenWrestler }) => {
               <div className="absolute inset-0 bg-gradient-to-t from-[#6A0DAD]/40 to-transparent" />
             </motion.div>
             <motion.div initial={{ opacity: 0, x: 30 }} animate={{ opacity: 1, x: 0 }}>
-              {w.champion && (
-                <div className="inline-flex items-center gap-2 glass px-4 py-1.5 rounded-full mb-4">
-                  <Trophy size={14} className="text-[#B15EFF]" />
-                  <span className="font-oswald uppercase tracking-widest text-xs">{w.championship}</span>
-                </div>
-              )}
-              <div className="font-oswald uppercase tracking-[0.3em] text-[#B15EFF]">"{w.nickname}"</div>
+              {w.nickname ? <div className="font-oswald uppercase tracking-[0.3em] text-[#B15EFF]">"{w.nickname}"</div> : null}
               <h1 className="font-bebas text-7xl md:text-8xl leading-none">{w.name}</h1>
-              <p className="mt-6 text-[#BDBDBD] text-lg leading-relaxed font-poppins font-300">{w.bio}</p>
+              {w.bio ? <p className="mt-6 text-[#BDBDBD] text-lg leading-relaxed font-poppins font-300">{w.bio}</p> : null}
               <div className="flex gap-4 mt-6">
                 <a href={w.social?.instagram || '#'} className="w-11 h-11 rounded-full glass flex items-center justify-center hover:border-[#8A2BE2] hover:text-[#B15EFF]"><Instagram size={18} /></a>
                 <a href={w.social?.twitter || '#'} className="w-11 h-11 rounded-full glass flex items-center justify-center hover:border-[#8A2BE2] hover:text-[#B15EFF]"><Twitter size={18} /></a>
@@ -871,52 +856,61 @@ const WrestlerDetail = ({ w, data, nav, onOpenWrestler }) => {
         </div>
       </section>
 
-      <section className="py-12 border-y border-white/8">
-        <div className="container mx-auto px-5 grid grid-cols-2 md:grid-cols-4 gap-6">
-          {stats.map((s) => (
-            <div key={s.l} className="text-center">
-              <div className="font-bebas text-3xl amethyst-text">{s.v}</div>
-              <div className="font-oswald uppercase tracking-widest text-xs text-[#BDBDBD] mt-1">{s.l}</div>
-            </div>
-          ))}
-        </div>
-      </section>
+      {stats.length > 0 && (
+        <section className="py-12 border-y border-white/8">
+          <div className="container mx-auto px-5 grid grid-cols-2 md:grid-cols-4 gap-6">
+            {stats.map((s) => (
+              <div key={s.l} className="text-center">
+                <div className="font-bebas text-3xl amethyst-text">{s.v}</div>
+                <div className="font-oswald uppercase tracking-widest text-xs text-[#BDBDBD] mt-1">{s.l}</div>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
 
       <section className="py-16">
         <div className="container mx-auto px-5 grid lg:grid-cols-3 gap-12">
           <div className="lg:col-span-2 space-y-10">
-            <div className="grid md:grid-cols-2 gap-6">
-              <div className="glass rounded-xl p-6">
-                <div className="font-oswald uppercase tracking-widest text-xs text-[#B15EFF] mb-2">Finisher</div>
-                <div className="font-bebas text-3xl">{w.finisher}</div>
-              </div>
-              <div className="glass rounded-xl p-6">
-                <div className="font-oswald uppercase tracking-widest text-xs text-[#B15EFF] mb-3">Signature Moves</div>
-                <ul className="space-y-1">
-                  {(w.signatures || []).map((s) => <li key={s} className="flex items-center gap-2 text-[#BDBDBD] font-poppins text-sm"><Zap size={13} className="text-[#8A2BE2]" /> {s}</li>)}
-                </ul>
-              </div>
-            </div>
-            {w.championship && (
-              <div className="glass rounded-xl p-6">
-                <div className="font-oswald uppercase tracking-widest text-xs text-[#B15EFF] mb-2">Championships</div>
-                <div className="flex items-center gap-2 font-bebas text-2xl"><Trophy size={20} className="text-[#B15EFF]" /> {w.championship}</div>
+            {hasDetails ? (
+              <>
+                {(w.finisher || (w.signatures && w.signatures.length > 0)) && (
+                  <div className="grid md:grid-cols-2 gap-6">
+                    {w.finisher && (
+                      <div className="glass rounded-xl p-6">
+                        <div className="font-oswald uppercase tracking-widest text-xs text-[#B15EFF] mb-2">Finisher</div>
+                        <div className="font-bebas text-3xl">{w.finisher}</div>
+                      </div>
+                    )}
+                    {w.signatures && w.signatures.length > 0 && (
+                      <div className="glass rounded-xl p-6">
+                        <div className="font-oswald uppercase tracking-widest text-xs text-[#B15EFF] mb-3">Signature Moves</div>
+                        <ul className="space-y-1">
+                          {w.signatures.map((s) => <li key={s} className="flex items-center gap-2 text-[#BDBDBD] font-poppins text-sm"><Zap size={13} className="text-[#8A2BE2]" /> {s}</li>)}
+                        </ul>
+                      </div>
+                    )}
+                  </div>
+                )}
+                <div>
+                  <h3 className="font-bebas text-4xl mb-5">GALLERY</h3>
+                  <div className="grid grid-cols-3 gap-4">
+                    {gallery.map((g, i) => (
+                      <div key={i} className="rounded-lg overflow-hidden aspect-[4/5]"><img src={g} alt="" className="w-full h-full object-cover hover:scale-110 transition-transform duration-500" /></div>
+                    ))}
+                  </div>
+                </div>
+                <div>
+                  <h3 className="font-bebas text-4xl mb-5">ENTRANCE VIDEO</h3>
+                  <VideoThumb img={w.image} label={`${w.name} — Entrance`} />
+                </div>
+              </>
+            ) : (
+              <div className="glass rounded-xl p-10 text-center">
+                <div className="font-bebas text-4xl">FULL PROFILE COMING SOON</div>
+                <p className="mt-3 text-[#BDBDBD] font-poppins font-300">Bio, stats, signature moves, and media for {w.name} will be added soon. Stay tuned.</p>
               </div>
             )}
-            <div>
-              <h3 className="font-bebas text-4xl mb-5">GALLERY</h3>
-              <div className="grid grid-cols-3 gap-4">
-                {gallery.map((g, i) => (
-                  <div key={i} className="rounded-lg overflow-hidden aspect-[4/5]"><img src={g} alt="" className="w-full h-full object-cover hover:scale-110 transition-transform duration-500" /></div>
-                ))}
-              </div>
-            </div>
-            <div>
-              <h3 className="font-bebas text-4xl mb-5">ENTRANCE VIDEO</h3>
-              <div className="rounded-xl overflow-hidden glow border border-white/8 aspect-video">
-                <iframe className="w-full h-full" src="https://www.youtube.com/embed/videoseries?list=PLFgquLnL59ak0F0eap5tFgAX4frJmWfrX" title="entrance" allowFullScreen />
-              </div>
-            </div>
           </div>
           <aside className="space-y-6">
             <div className="glass rounded-xl p-6">
