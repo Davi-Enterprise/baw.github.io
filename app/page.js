@@ -38,6 +38,7 @@ const GlobalStyles = () => (
     .marquee { animation:marquee 30s linear infinite; }
     @keyframes pulseGlow { 0%,100%{opacity:.5;transform:scale(1)} 50%{opacity:1;transform:scale(1.08)} }
     .pulse-glow { animation:pulseGlow 2.4s ease-in-out infinite; }
+    .logo-blend { mix-blend-mode:screen; }
     @keyframes floatUp { 0%{opacity:0;transform:translateY(20px)} 100%{opacity:1;transform:translateY(0)} }
   `}</style>
 )
@@ -201,14 +202,22 @@ const EventCard = ({ ev, onOpen, onTickets, i }) => (
 const WrestlerCard = ({ w, onOpen, i }) => (
   <motion.div variants={reveal} initial="hidden" whileInView="show" viewport={{ once: true }} custom={i}
     onClick={() => onOpen(w)}
-    className="group relative rounded-xl overflow-hidden cursor-pointer h-[420px] border border-white/8">
-    <img src={w.image} alt={w.name} className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110" />
-    <div className="absolute inset-0 bg-gradient-to-t from-[#090909] via-[#090909]/40 to-transparent" />
-    <div className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-500 bg-gradient-to-t from-[#6A0DAD]/40 to-transparent" />
-    <div className="absolute bottom-0 left-0 right-0 p-6 translate-y-1 group-hover:translate-y-0 transition-transform duration-500">
-      {w.nickname ? <div className="font-oswald text-xs uppercase tracking-widest text-[#B15EFF]">"{w.nickname}"</div> : null}
-      <h3 className="font-bebas text-3xl leading-none mt-1">{w.name}</h3>
-    </div>
+    className="group relative rounded-xl overflow-hidden cursor-pointer h-[440px] border border-white/8 bg-[#090909]">
+    <img src={w.image} alt={w.name} className={`w-full h-full transition-transform duration-700 group-hover:scale-105 ${w.showName === false ? 'object-contain' : 'object-cover'}`} />
+    <div className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-500 bg-gradient-to-t from-[#6A0DAD]/40 to-transparent pointer-events-none" />
+    {w.showName === false ? (
+      <div className="absolute inset-0 flex items-end justify-center pb-5 opacity-0 group-hover:opacity-100 transition-opacity duration-500 pointer-events-none">
+        <span className="glass px-4 py-2 rounded-full font-oswald uppercase tracking-widest text-xs text-[#B15EFF]">View Profile</span>
+      </div>
+    ) : (
+      <>
+        <div className="absolute inset-0 bg-gradient-to-t from-[#090909] via-[#090909]/40 to-transparent pointer-events-none" />
+        <div className="absolute bottom-0 left-0 right-0 p-6 translate-y-1 group-hover:translate-y-0 transition-transform duration-500">
+          {w.nickname ? <div className="font-oswald text-xs uppercase tracking-widest text-[#B15EFF]">"{w.nickname}"</div> : null}
+          <h3 className="font-bebas text-3xl leading-none mt-1">{w.name}</h3>
+        </div>
+      </>
+    )}
   </motion.div>
 )
 
@@ -239,13 +248,7 @@ const Navbar = ({ nav, scrolled, current, onOpen }) => {
         className={`fixed top-0 inset-x-0 z-50 transition-all duration-500 ${scrolled ? 'glass py-3 shadow-lg shadow-black/40' : 'bg-transparent py-5'}`}>
         <div className="container mx-auto px-5 flex items-center justify-between">
           <div onClick={() => go('home')} className="flex items-center gap-3 cursor-pointer group">
-            <div className="w-9 h-9 rotate-45 bg-gradient-to-br from-[#6A0DAD] to-[#B15EFF] rounded-sm glow flex items-center justify-center">
-              <span className="-rotate-45 font-bebas text-xl text-white">BA</span>
-            </div>
-            <div className="leading-none">
-              <div className="font-bebas text-xl tracking-wide">BLACK AMETHYST</div>
-              <div className="font-oswald text-[9px] tracking-[0.4em] text-[#B15EFF]">WRESTLING</div>
-            </div>
+            <img src="/logo.png" alt="Black Amethyst Wrestling" className="logo-blend h-12 md:h-14 w-auto transition-transform duration-300 group-hover:scale-105" />
           </div>
           <nav className="hidden lg:flex items-center gap-7">
             {NAV.map((item) => {
@@ -782,9 +785,12 @@ const ROSTER_FILTERS = [
 const RosterPage = ({ data, onOpenWrestler }) => {
   const [filter, setFilter] = useState('all')
   const [query, setQuery] = useState('')
+  const CAT_LABELS = { men: 'Men', women: 'Women', tag: 'Tag Teams', managers: 'Managers', officials: 'Officials', alumni: 'Alumni' }
+  const presentCats = [...new Set(data.wrestlers.map((w) => w.category).filter(Boolean))]
+  const filters = [{ k: 'all', l: 'All' }, ...presentCats.map((c) => ({ k: c, l: CAT_LABELS[c] || c }))]
   const list = data.wrestlers.filter((w) => {
-    const matchF = filter === 'all' ? true : filter === 'champions' ? w.champion : w.category === filter
-    const matchQ = !query || `${w.name} ${w.nickname}`.toLowerCase().includes(query.toLowerCase())
+    const matchF = filter === 'all' ? true : w.category === filter
+    const matchQ = !query || `${w.name} ${w.nickname || ''}`.toLowerCase().includes(query.toLowerCase())
     return matchF && matchQ
   })
   return (
@@ -794,7 +800,7 @@ const RosterPage = ({ data, onOpenWrestler }) => {
         <div className="container mx-auto px-5">
           <div className="flex flex-col md:flex-row gap-6 items-center justify-between mb-12">
             <div className="flex flex-wrap gap-2">
-              {ROSTER_FILTERS.map((f) => (
+              {filters.map((f) => (
                 <button key={f.k} onClick={() => setFilter(f.k)}
                   className={`px-5 py-2 rounded-full font-oswald uppercase tracking-widest text-xs transition-all ${filter === f.k ? 'bg-gradient-to-r from-[#6A0DAD] to-[#8A2BE2] text-white glow' : 'glass text-[#BDBDBD] hover:text-white'}`}>
                   {f.l}
@@ -1159,8 +1165,7 @@ const Footer = ({ nav }) => (
       <div className="grid md:grid-cols-4 gap-10 mb-12">
         <div>
           <div className="flex items-center gap-3 mb-4">
-            <div className="w-9 h-9 rotate-45 bg-gradient-to-br from-[#6A0DAD] to-[#B15EFF] rounded-sm glow flex items-center justify-center"><span className="-rotate-45 font-bebas text-lg text-white">BA</span></div>
-            <div><div className="font-bebas text-lg">BLACK AMETHYST</div><div className="font-oswald text-[8px] tracking-[0.4em] text-[#B15EFF]">WRESTLING</div></div>
+            <img src="/logo.png" alt="Black Amethyst Wrestling" className="logo-blend h-20 w-auto" />
           </div>
           <p className="text-sm text-[#BDBDBD] font-poppins font-300">Where raw energy meets destiny. Independent professional wrestling at its finest.</p>
           <div className="flex gap-3 mt-5">
@@ -1223,13 +1228,9 @@ const MerchPage = () => (
 const LoadingScreen = () => (
   <motion.div initial={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.7 }}
     className="fixed inset-0 z-[100] bg-[#090909] flex flex-col items-center justify-center">
-    <motion.div initial={{ scale: 0.6, opacity: 0, rotate: 45 }} animate={{ scale: 1, opacity: 1, rotate: 45 }} transition={{ duration: 0.8 }}
-      className="w-24 h-24 bg-gradient-to-br from-[#6A0DAD] to-[#B15EFF] rounded-lg glow flex items-center justify-center pulse-glow">
-      <span className="-rotate-45 font-bebas text-4xl text-white">BA</span>
-    </motion.div>
-    <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.5 }} className="mt-8 text-center">
-      <div className="font-bebas text-3xl tracking-widest">BLACK AMETHYST</div>
-      <div className="font-oswald text-xs tracking-[0.5em] text-[#B15EFF] mt-1">WRESTLING</div>
+    <motion.div initial={{ scale: 0.7, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} transition={{ duration: 0.9 }} className="relative pulse-glow">
+      <div className="absolute inset-0 blur-3xl bg-[#6A0DAD]/50 rounded-full scale-90" />
+      <img src="/logo.png" alt="Black Amethyst Wrestling" className="logo-blend relative w-52 h-52 md:w-60 md:h-60 object-contain" />
     </motion.div>
     <div className="mt-8 w-40 h-0.5 bg-white/10 rounded-full overflow-hidden">
       <motion.div initial={{ x: '-100%' }} animate={{ x: '100%' }} transition={{ repeat: Infinity, duration: 1.1, ease: 'easeInOut' }} className="h-full w-1/2 bg-gradient-to-r from-transparent via-[#B15EFF] to-transparent" />

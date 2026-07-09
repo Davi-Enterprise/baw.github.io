@@ -184,70 +184,14 @@ function seedEvents() {
 
 function seedWrestlers() {
   return [
-    {
-      id: 'obsidian-king', name: 'KANE VOSS', nickname: 'The Obsidian King', category: 'men',
-      champion: true, championship: 'World Heavyweight Champion', image: IMG.w1,
-      height: '6\'5"', weight: '265 lbs', hometown: 'Detroit, Michigan', debut: '2016',
-      finisher: 'The Amethyst Crush', signatures: ['Obsidian Bomb', 'King\'s Decree', 'Shadow Lariat'],
-      bio: 'A monolith of raw power and cold precision, Kane Voss rules the ring with an iron will. Undefeated in championship defenses for over 400 days, the Obsidian King is the standard by which all others are measured.',
-      social: { twitter: '#', instagram: '#' },
-    },
-    {
-      id: 'midnight-cole', name: 'MARCUS COLE', nickname: 'Midnight', category: 'men',
-      champion: false, championship: '', image: IMG.w2,
-      height: '6\'1"', weight: '225 lbs', hometown: 'New Orleans, Louisiana', debut: '2018',
-      finisher: 'The Witching Hour', signatures: ['Midnight Express', 'Eclipse DDT'],
-      bio: 'Charismatic, calculated, and dangerous after dark. Marcus Cole thrives when the stakes are highest, earning a reputation as the man who never blinks.',
-      social: { twitter: '#', instagram: '#' },
-    },
-    {
-      id: 'nightshade', name: 'AISHA BENNETT', nickname: 'Nightshade', category: 'women',
-      champion: true, championship: 'Women\'s Champion', image: IMG.wf1,
-      height: '5\'9"', weight: '145 lbs', hometown: 'Atlanta, Georgia', debut: '2017',
-      finisher: 'Venom Strike', signatures: ['Poison Kick', 'Nightfall Suplex'],
-      bio: 'Lethal, poised, and utterly unpredictable. Nightshade has redefined what it means to be a champion, blending striking artistry with ruthless efficiency.',
-      social: { twitter: '#', instagram: '#' },
-    },
-    {
-      id: 'violet-storm', name: 'VERA KANE', nickname: 'Violet Storm', category: 'women',
-      champion: false, championship: '', image: IMG.wf2,
-      height: '5\'7"', weight: '138 lbs', hometown: 'Seattle, Washington', debut: '2019',
-      finisher: 'Storm Surge', signatures: ['Thunderclap', 'Violet Twister'],
-      bio: 'A force of nature. Vera Kane brings relentless intensity and a lightning-fast arsenal that leaves opponents reeling.',
-      social: { twitter: '#', instagram: '#' },
-    },
-    {
-      id: 'dante-reyes', name: 'DANTE REYES', nickname: 'El Fuego', category: 'men',
-      champion: false, championship: '', image: IMG.w4,
-      height: '6\'0"', weight: '218 lbs', hometown: 'San Antonio, Texas', debut: '2015',
-      finisher: 'Inferno Driver', signatures: ['Fuego Splash', 'Reyes Cutter'],
-      bio: 'High-flying and fearless, Dante Reyes ignites every arena he steps into with breathtaking aerial assaults and unbreakable heart.',
-      social: { twitter: '#', instagram: '#' },
-    },
-    {
-      id: 'julian-frost', name: 'JULIAN FROST', nickname: 'The Cold Prince', category: 'men',
-      champion: false, championship: '', image: IMG.w6,
-      height: '6\'3"', weight: '240 lbs', hometown: 'Boston, Massachusetts', debut: '2014',
-      finisher: 'Frostbite', signatures: ['Glacier Slam', 'Cold Snap'],
-      bio: 'Methodical and merciless, Julian Frost freezes the momentum of any opponent. His technical mastery is matched only by his icy resolve.',
-      social: { twitter: '#', instagram: '#' },
-    },
-    {
-      id: 'selena-cruz', name: 'SELENA CRUZ', nickname: 'La Reina', category: 'women',
-      champion: false, championship: '', image: IMG.w5,
-      height: '5\'8"', weight: '142 lbs', hometown: 'Miami, Florida', debut: '2020',
-      finisher: 'Reina Lock', signatures: ['Crown Kick', 'Royal Bridge'],
-      bio: 'Regal, ruthless, and rising fast. Selena Cruz carries herself like royalty and backs it up with a devastating submission game.',
-      social: { twitter: '#', instagram: '#' },
-    },
-    {
-      id: 'amethyst-twins', name: 'THE AMETHYST TWINS', nickname: 'Gemini Dynasty', category: 'tag',
-      champion: true, championship: 'Tag Team Champions', image: IMG.w3,
-      height: '6\'2"', weight: '460 lbs (combined)', hometown: 'Las Vegas, Nevada', debut: '2018',
-      finisher: 'Twin Eclipse', signatures: ['Double Amethyst', 'Gemini Bomb'],
-      bio: 'Perfectly synchronized and impossible to predict, The Amethyst Twins have dominated the tag division with flawless teamwork and twin telepathy.',
-      social: { twitter: '#', instagram: '#' },
-    },
+    { id: 'tj-slater', name: 'TJ SLATER', category: 'men', champion: false, image: '/tj-slater.png', showName: false },
+    { id: 'arik-walker', name: 'ARIK WALKER', category: 'men', champion: false, image: '/arik-walker.png', showName: false },
+    { id: 'dangelo-leflame', name: "D'ANGELO LE FLAME", category: 'men', champion: false, image: '/dangelo-leflame.png', showName: false },
+    { id: 'alex-rey', name: 'ALEX REY', category: 'men', champion: false, image: '/alex-rey.png', showName: false },
+    { id: 'big-haus', name: 'BIG HAUS', category: 'men', champion: false, image: '/big-haus.jpeg', showName: false },
+    { id: 'draco', name: 'DRACO', nickname: 'The Last Dragon', category: 'men', champion: false, image: '/draco.png', showName: false },
+    { id: 'james-derek', name: 'JAMES DEREK', nickname: 'Da Product', category: 'men', champion: false, image: '/james-derek.webp', showName: false },
+    { id: 'rakzo-moreno', name: 'RAKZO MORENO', category: 'men', champion: false, image: '/rakzo-moreno.webp', showName: false },
   ]
 }
 
