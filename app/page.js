@@ -53,11 +53,9 @@ const SPONSORS = ['APEX ATHLETICS', 'MONOLITH', 'VOID ENERGY', 'IRON FORGE', 'NO
 const NAV = ['Home', 'Events', 'Tickets', 'Roster', 'Media', 'News', 'About', 'Contact']
 
 const TICKET_TIERS = [
-  { name: 'General Admission', price: 35, popular: false, benefits: ['General floor & bowl access', 'Standing / open seating', 'Access to concessions', 'Event program (digital)'] },
-  { name: 'Reserved Seating', price: 65, popular: false, benefits: ['Guaranteed reserved seat', 'Lower bowl views', 'Priority entry lane', 'Event program (digital)'] },
-  { name: 'Front Row', price: 149, popular: true, benefits: ['Front-row ringside seat', 'Unobstructed action', 'Commemorative lanyard', 'Priority entry lane', 'Early merch access'] },
-  { name: 'VIP Experience', price: 299, popular: false, benefits: ['Premium ringside seat', 'Backstage tour', 'Meet & greet with talent', 'VIP lounge access', 'Signed poster + merch pack', 'Valet parking'] },
-  { name: 'Family Package', price: 120, popular: false, benefits: ['4 reserved seats', 'Best value for families', '4 digital programs', 'Priority entry lane', 'Concession voucher'] },
+  { name: 'General Admission', price: 20, popular: false, benefits: ['General open seating', 'Access to the full show', 'Concessions available', 'Unbeatable value for the night'] },
+  { name: 'First Row', price: 30, popular: true, benefits: ['Front-row ringside seat', 'Closest view of the action', 'Feel every impact up close', 'Strictly limited availability'] },
+  { name: 'Kids', price: 10, popular: false, benefits: ['Discounted kids admission', 'Ages 12 and under', 'Seating with your group', 'Perfect for the whole family'] },
 ]
 
 const TICKET_FAQ = [
@@ -575,6 +573,21 @@ const EventsPage = ({ data, onOpenEvent, onTickets }) => (
         <SectionHeading overline="Mark Your Calendar" title="UPCOMING EVENTS" center />
         <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-8">
           {data.events.map((ev, i) => <EventCard key={ev.id} ev={ev} i={i} onOpen={onOpenEvent} onTickets={onTickets} />)}
+        </div>
+
+        <div className="mt-24 grid lg:grid-cols-2 gap-12 items-center">
+          <motion.div variants={reveal} initial="hidden" whileInView="show" viewport={{ once: true }}
+            className="relative rounded-2xl overflow-hidden glow border border-white/8 max-w-sm mx-auto">
+            <img src="/schedule-poster.jpeg" alt="Black Amethyst Wrestling 2026-2027 Event Schedule" className="w-full h-auto" />
+          </motion.div>
+          <motion.div variants={reveal} initial="hidden" whileInView="show" viewport={{ once: true }}>
+            <div className="font-oswald uppercase tracking-[0.4em] text-xs text-[#B15EFF] mb-3">2026 — 2027 Season</div>
+            <h2 className="font-bebas text-5xl md:text-6xl leading-none">THIS IS JUST THE BEGINNING</h2>
+            <p className="mt-5 text-[#BDBDBD] text-lg leading-relaxed font-poppins font-300">
+              Six landmark events. One unforgettable season. From the Inaugural Show in Houston to themed spectacles and cross-promotion collaborations, the Black Amethyst Wrestling 2026–2027 season is a statement of intent.
+            </p>
+            <div className="mt-8"><GlowButton onClick={() => onTickets(null)}><Ticket size={16} /> Get Inaugural Tickets</GlowButton></div>
+          </motion.div>
         </div>
       </div>
     </section>
