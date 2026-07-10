@@ -225,12 +225,16 @@ function seedNews() {
 }
 
 async function ensureSeed(db) {
-  const eCount = await db.collection('events').countDocuments()
-  if (eCount === 0) await db.collection('events').insertMany(seedEvents())
-  const wCount = await db.collection('wrestlers').countDocuments()
-  if (wCount === 0) await db.collection('wrestlers').insertMany(seedWrestlers())
-  const nCount = await db.collection('news').countDocuments()
-  if (nCount === 0) await db.collection('news').insertMany(seedNews())
+  // Idempotent, race-safe seeding: upsert each seed doc by its unique `id`.
+  const seedColl = async (coll, docs) => {
+    const ops = docs.map((d) => ({ updateOne: { filter: { id: d.id }, update: { $setOnInsert: d }, upsert: true } }))
+    if (ops.length) {
+      try { await db.collection(coll).bulkWrite(ops, { ordered: false }) } catch (e) { /* ignore dup races */ }
+    }
+  }
+  await seedColl('events', seedEvents())
+  await seedColl('wrestlers', seedWrestlers())
+  await seedColl('news', seedNews())
 }
 
 function clean(arr) {
