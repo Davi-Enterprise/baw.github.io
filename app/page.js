@@ -1411,7 +1411,12 @@ const CartDrawer = ({ ev }) => {
                       </div>
                       <div className="flex items-center gap-2">
                         <button onClick={() => cart.setQty(i.tier, i.qty - 1)} className="w-8 h-8 rounded-md glass flex items-center justify-center"><Minus size={14} /></button>
-                        <span className="font-bebas text-lg w-6 text-center">{i.qty}</span>
+                        <input
+                          type="number" min="1" max="20" value={i.qty}
+                          onChange={(e) => cart.setQty(i.tier, parseInt(e.target.value) || 1)}
+                          className="w-14 h-8 bg-white/5 border border-white/10 rounded-md text-center font-bebas text-lg text-white focus:outline-none focus:border-[#8A2BE2]"
+                          style={{ appearance: 'textfield' }}
+                        />
                         <button onClick={() => cart.setQty(i.tier, i.qty + 1)} className="w-8 h-8 rounded-md glass flex items-center justify-center"><Plus size={14} /></button>
                       </div>
                       <button onClick={() => cart.remove(i.tier)} className="text-[#BDBDBD] hover:text-red-400 ml-1"><Trash2 size={16} /></button>
