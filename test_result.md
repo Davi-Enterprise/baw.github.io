@@ -175,6 +175,28 @@ backend:
         -working: true
         -agent: "testing"
         -comment: "✅ TESTED: POST /api/contact with valid data (name, email, phone, subject, message) returns 200 with {message, id}. UUID id confirmed. POST with missing required fields correctly returns 400 with error 'name, email and message are required'. Validation working correctly."
+  - task: "PayPal create-order endpoint"
+    implemented: true
+    working: true
+    file: "/app/app/api/[[...path]]/route.js"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        -working: true
+        -agent: "testing"
+        -comment: "✅ TESTED: POST /api/paypal/create-order with valid tier (General Admission x2) returns 200 with {orderID}. PayPal sandbox order created successfully. MongoDB order document verified with UUID id, paypalOrderId, tier, qty, amount=40, status='pending'. No MongoDB _id exposed in API response. All three tiers tested (General Admission $20, First Row $30, Kids $10) with correct server-side pricing. Invalid tier 'VIP Nonsense' correctly returns 400 with error. Qty clamping working correctly: qty=0 clamped to 1, qty=99 clamped to 20, amounts reflect clamped qty."
+  - task: "PayPal capture-order endpoint"
+    implemented: true
+    working: true
+    file: "/app/app/api/[[...path]]/route.js"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        -working: true
+        -agent: "testing"
+        -comment: "✅ TESTED: POST /api/paypal/capture-order with missing orderID correctly returns 400 with error 'orderID required'. POST with fake/unapproved orderID 'FAKEORDER123' correctly returns 502 with error (no server crash). This is expected behavior as full successful capture requires buyer approval in PayPal UI which cannot be automated in testing."
 
 frontend:
   - task: "Cinematic multi-page SPA (Home, Events, Tickets, Roster, Media, News, About, Contact + details)"
@@ -206,3 +228,5 @@ agent_communication:
     -message: "Backend MVP complete for BAW. Please test all API endpoints: GET /api/events (list sorted by date), GET /api/events/{id} (detail + 404 for bad id), GET /api/wrestlers (list), GET /api/wrestlers/{id} (detail + 404), GET /api/news (list). POST /api/newsletter (valid email 200, missing email 400). POST /api/contact (valid 200, missing required fields 400). Auto-seed should populate data on first call. Base URL uses NEXT_PUBLIC_BASE_URL with /api prefix. Do NOT use ObjectID — all docs use UUID/string ids."
     -agent: "testing"
     -message: "✅ ALL BACKEND TESTS PASSED (11/11 - 100%). Comprehensive testing completed for all API endpoints. Events API: list (4 events, sorted ascending), detail, and 404 handling verified. Wrestlers API: list (8 wrestlers with men/women/tag categories), detail, and 404 handling verified. News API: list (6 articles, sorted descending/newest first) verified. Newsletter signup: valid email returns 200 with UUID, missing email returns 400. Contact form: valid submission returns 200 with UUID, missing required fields returns 400. All responses use UUID ids (no MongoDB _id). Data auto-seeding working correctly. All validation and error handling working as expected. Backend is production-ready."
+    -agent: "testing"
+    -message: "✅ PAYPAL PAYMENT INTEGRATION TESTS PASSED (6/6 - 100%). All PayPal endpoints tested successfully. POST /api/paypal/create-order: Creates PayPal sandbox orders, returns orderID, stores pending order in MongoDB with UUID id (no _id exposed). All three tiers tested with correct server-side pricing (General Admission $20, First Row $30, Kids $10). Invalid tier returns 400. Qty clamping working (0->1, 99->20). POST /api/paypal/capture-order: Missing orderID returns 400. Fake/unapproved orderID returns 502 (expected - requires buyer approval). REGRESSION TESTS PASSED (3/3): Events (6 events, inaugural-show first with on-sale status), Wrestlers (8 wrestlers with correct IDs, all category 'men', champion false), News (6 articles). PayPal integration is production-ready for sandbox mode."

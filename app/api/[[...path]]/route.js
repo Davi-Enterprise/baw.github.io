@@ -42,6 +42,21 @@ const IMG = {
   wf2: 'https://images.unsplash.com/photo-1611816153165-fed23698666d?crop=entropy&cs=srgb&fm=jpg&q=85',
 }
 
+const PAYPAL_BASE = process.env.PAYPAL_API_BASE || 'https://api-m.sandbox.paypal.com'
+const TICKET_PRICING = { 'General Admission': 20, 'First Row': 30, 'Kids': 10 }
+
+async function getPayPalAccessToken() {
+  const auth = Buffer.from(`${process.env.PAYPAL_CLIENT_ID}:${process.env.PAYPAL_CLIENT_SECRET}`).toString('base64')
+  const res = await fetch(`${PAYPAL_BASE}/v1/oauth2/token`, {
+    method: 'POST',
+    headers: { Authorization: `Basic ${auth}`, 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: 'grant_type=client_credentials',
+  })
+  const data = await res.json()
+  if (!res.ok) throw new Error('PayPal auth failed: ' + JSON.stringify(data))
+  return data.access_token
+}
+
 function daysFromNow(d, hour = 19, min = 30) {
   const dt = new Date()
   dt.setDate(dt.getDate() + d)
@@ -298,6 +313,71 @@ async function handleRoute(request, { params }) {
       }
       await db.collection('contacts').insertOne(doc)
       return handleCORS(NextResponse.json({ message: 'Message received', id: doc.id }))
+    }
+
+    // PayPal: create order
+    if (route === '/paypal/create-order' && method === 'POST') {
+      const body = await request.json()
+      const tier = body.tier
+      const qty = Math.max(1, Math.min(20, parseInt(body.qty) || 1))
+      const unit = TICKET_PRICING[tier]
+      if (!unit) return handleCORS(NextResponse.json({ error: 'Invalid ticket tier' }, { status: 400 }))
+      const total = (unit * qty).toFixed(2)
+      const orderDoc = {
+        id: uuidv4(), tier, qty, unit, amount: Number(total),
+        email: body.email || '', eventId: body.eventId || 'inaugural-show',
+        status: 'pending', createdAt: new Date(),
+      }
+      const token = await getPayPalAccessToken()
+      const res = await fetch(`${PAYPAL_BASE}/v2/checkout/orders`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          intent: 'CAPTURE',
+          purchase_units: [{
+            custom_id: orderDoc.id,
+            description: `BAW ${tier} x${qty} - Inaugural Show`.slice(0, 127),
+            amount: {
+              currency_code: 'USD',
+              value: total,
+              breakdown: { item_total: { currency_code: 'USD', value: total } },
+            },
+            items: [{
+              name: `${tier} Ticket`.slice(0, 127),
+              quantity: String(qty),
+              unit_amount: { currency_code: 'USD', value: unit.toFixed(2) },
+            }],
+          }],
+          application_context: { brand_name: 'Black Amethyst Wrestling', shipping_preference: 'NO_SHIPPING', user_action: 'PAY_NOW' },
+        }),
+      })
+      const data = await res.json()
+      if (!res.ok) return handleCORS(NextResponse.json({ error: 'PayPal order failed', details: data }, { status: 502 }))
+      orderDoc.paypalOrderId = data.id
+      await db.collection('orders').insertOne(orderDoc)
+      return handleCORS(NextResponse.json({ orderID: data.id }))
+    }
+
+    // PayPal: capture order
+    if (route === '/paypal/capture-order' && method === 'POST') {
+      const body = await request.json()
+      const orderID = body.orderID
+      if (!orderID) return handleCORS(NextResponse.json({ error: 'orderID required' }, { status: 400 }))
+      const token = await getPayPalAccessToken()
+      const res = await fetch(`${PAYPAL_BASE}/v2/checkout/orders/${orderID}/capture`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      })
+      const data = await res.json()
+      if (!res.ok) return handleCORS(NextResponse.json({ error: 'Capture failed', details: data }, { status: 502 }))
+      const status = data.status
+      const capture = data?.purchase_units?.[0]?.payments?.captures?.[0]
+      const payerEmail = data?.payer?.email_address || ''
+      await db.collection('orders').updateOne(
+        { paypalOrderId: orderID },
+        { $set: { status: status === 'COMPLETED' ? 'paid' : status, capturedAt: new Date(), captureId: capture?.id || '', payerEmail } }
+      )
+      return handleCORS(NextResponse.json({ status, orderID, captureId: capture?.id || '' }))
     }
 
     return handleCORS(NextResponse.json({ error: `Route ${route} not found` }, { status: 404 }))

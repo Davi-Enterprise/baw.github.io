@@ -12,6 +12,10 @@ import { Textarea } from '@/components/ui/textarea'
 import {
   Accordion, AccordionContent, AccordionItem, AccordionTrigger,
 } from '@/components/ui/accordion'
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle,
+} from '@/components/ui/dialog'
+import { PayPalScriptProvider, PayPalButtons } from '@paypal/react-paypal-js'
 
 /* ============================= STYLES ============================= */
 const GlobalStyles = () => (
@@ -703,9 +707,91 @@ const EventDetail = ({ ev, data, onOpenEvent, onTickets, nav }) => {
 }
 
 /* ============================= TICKETS PAGE ============================= */
+const CheckoutModal = ({ tier, ev, onClose }) => {
+  const [qty, setQty] = useState(1)
+  const [email, setEmail] = useState('')
+  const [paid, setPaid] = useState(null)
+  const [err, setErr] = useState('')
+  const total = (tier.price * qty).toFixed(2)
+  const clientId = process.env.NEXT_PUBLIC_PAYPAL_CLIENT_ID
+  return (
+    <Dialog open={!!tier} onOpenChange={(o) => { if (!o) onClose() }}>
+      <DialogContent className="bg-[#111] border-white/10 text-[#F5F5F5] max-w-md">
+        <DialogHeader>
+          <DialogTitle className="font-bebas text-3xl tracking-wide">
+            {paid ? 'ORDER CONFIRMED' : `CHECKOUT`}
+          </DialogTitle>
+        </DialogHeader>
+        {paid ? (
+          <div className="text-center py-4">
+            <div className="w-16 h-16 mx-auto rounded-full bg-gradient-to-br from-[#6A0DAD] to-[#8A2BE2] glow flex items-center justify-center mb-4"><Check size={30} /></div>
+            <div className="font-bebas text-4xl amethyst-text">YOU'RE IN!</div>
+            <p className="text-[#BDBDBD] font-poppins text-sm mt-2">Your {qty} × {tier.name} ticket{qty > 1 ? 's' : ''} for {ev?.title} {qty > 1 ? 'are' : 'is'} confirmed. See you November 21 at Arena Tampico Madero!</p>
+            <div className="glass rounded-lg p-3 mt-4 text-xs text-[#BDBDBD] break-all">Confirmation #: {paid.captureId || paid.orderID}</div>
+            <GlowButton full className="mt-6" onClick={onClose}>Done</GlowButton>
+          </div>
+        ) : (
+          <div className="space-y-4">
+            <div className="glass rounded-lg p-3 flex justify-between items-center">
+              <div>
+                <div className="font-oswald uppercase tracking-widest text-xs text-[#B15EFF]">{tier.name}</div>
+                <div className="text-xs text-[#BDBDBD] font-poppins">{ev?.title} · Nov 21</div>
+              </div>
+              <div className="font-bebas text-2xl">${tier.price}<span className="text-xs text-[#BDBDBD]">/ea</span></div>
+            </div>
+            <div>
+              <label className="text-xs font-oswald uppercase tracking-widest text-[#BDBDBD]">Quantity</label>
+              <div className="flex items-center gap-3 mt-1">
+                <button onClick={() => setQty((q) => Math.max(1, q - 1))} className="w-9 h-9 rounded-md glass flex items-center justify-center text-xl">−</button>
+                <span className="font-bebas text-2xl w-8 text-center">{qty}</span>
+                <button onClick={() => setQty((q) => Math.min(20, q + 1))} className="w-9 h-9 rounded-md glass flex items-center justify-center text-xl">+</button>
+              </div>
+            </div>
+            <div>
+              <label className="text-xs font-oswald uppercase tracking-widest text-[#BDBDBD]">Email (for receipt)</label>
+              <Input value={email} onChange={(e) => setEmail(e.target.value)} type="email" placeholder="you@email.com" className="bg-white/5 border-white/10 h-11 mt-1 text-white placeholder:text-[#BDBDBD]/60" />
+            </div>
+            <div className="flex justify-between items-center font-bebas text-2xl border-t border-white/8 pt-3">
+              <span>TOTAL</span><span className="amethyst-text">${total}</span>
+            </div>
+            {err && <div className="text-red-400 text-sm font-poppins">{err}</div>}
+            <div className="pt-1 rounded-lg overflow-hidden">
+              {clientId ? (
+                <PayPalScriptProvider options={{ clientId, currency: 'USD', intent: 'capture', components: 'buttons', enableFunding: 'venmo,card' }}>
+                  <PayPalButtons
+                    style={{ layout: 'vertical', color: 'gold', shape: 'rect', label: 'paypal', height: 45 }}
+                    forceReRender={[qty, tier.name]}
+                    createOrder={async () => {
+                      setErr('')
+                      const r = await fetch('/api/paypal/create-order', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ tier: tier.name, qty, email, eventId: ev?.id }) })
+                      const d = await r.json()
+                      if (!d.orderID) { setErr('Could not start checkout. Please try again.'); throw new Error('no order id') }
+                      return d.orderID
+                    }}
+                    onApprove={async (data) => {
+                      const r = await fetch('/api/paypal/capture-order', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ orderID: data.orderID }) })
+                      const d = await r.json()
+                      if (d.status === 'COMPLETED') setPaid(d)
+                      else setErr('Payment could not be completed.')
+                    }}
+                    onError={(e) => { console.error('PayPal error', e); setErr('A payment error occurred. Please try again.') }}
+                  />
+                </PayPalScriptProvider>
+              ) : (
+                <div className="text-sm text-[#BDBDBD] font-poppins text-center py-3">Payments are being configured.</div>
+              )}
+            </div>
+            <p className="text-[10px] text-[#BDBDBD] text-center font-poppins">Secure checkout · Pay with PayPal, Venmo, or credit/debit card.</p>
+          </div>
+        )}
+      </DialogContent>
+    </Dialog>
+  )
+}
+
 const TicketsPage = ({ selectedEvent, data }) => {
   const [promo, setPromo] = useState('')
-  const [selected, setSelected] = useState(null)
+  const [checkout, setCheckout] = useState(null)
   const ev = selectedEvent || data.events.find((e) => e.status !== 'coming-soon')
   return (
     <div>
@@ -739,8 +825,8 @@ const TicketsPage = ({ selectedEvent, data }) => {
                     <li key={b} className="flex items-start gap-2 text-sm text-[#BDBDBD] font-poppins font-300"><Check size={16} className="text-[#B15EFF] mt-0.5 shrink-0" /> {b}</li>
                   ))}
                 </ul>
-                <GlowButton full variant={t.popular ? 'primary' : 'outline'} className="mt-8" onClick={() => setSelected(t.name)}>
-                  {selected === t.name ? 'Added ✓' : 'Purchase'}
+                <GlowButton full variant={t.popular ? 'primary' : 'outline'} className="mt-8" onClick={() => setCheckout(t)}>
+                  <Ticket size={14} /> Buy Now
                 </GlowButton>
               </motion.div>
             ))}
@@ -773,6 +859,7 @@ const TicketsPage = ({ selectedEvent, data }) => {
           </div>
         </div>
       </section>
+      {checkout && <CheckoutModal tier={checkout} ev={ev} onClose={() => setCheckout(null)} />}
     </div>
   )
 }
