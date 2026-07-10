@@ -1,11 +1,12 @@
 'use client'
 
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, createContext, useContext } from 'react'
 import { motion, AnimatePresence, useScroll, useMotionValueEvent } from 'framer-motion'
 import {
   Menu, X, ArrowRight, ChevronRight, ChevronLeft, MapPin, Calendar, Clock,
   Ticket, Play, Instagram, Youtube, Twitter, Facebook, Search, ArrowUp,
   Trophy, Users, Zap, Mail, Phone, Send, ChevronDown, Check, Star, Share2, Flame,
+  ShoppingCart, Plus, Minus, Trash2,
 } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
@@ -243,6 +244,19 @@ const NewsCard = ({ n, i }) => (
 )
 
 /* ============================= NAV ============================= */
+const CartButton = () => {
+  const cart = useCart()
+  return (
+    <button onClick={() => cart.setOpen(true)} aria-label="Cart"
+      className="relative w-10 h-10 rounded-full glass flex items-center justify-center hover:border-[#8A2BE2] text-[#F5F5F5]">
+      <ShoppingCart size={18} />
+      {cart.count > 0 && (
+        <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 bg-gradient-to-r from-[#6A0DAD] to-[#B15EFF] text-[10px] font-bold rounded-full flex items-center justify-center">{cart.count}</span>
+      )}
+    </button>
+  )
+}
+
 const Navbar = ({ nav, scrolled, current, onOpen }) => {
   const [menu, setMenu] = useState(false)
   const go = (p) => { setMenu(false); nav(p) }
@@ -252,7 +266,7 @@ const Navbar = ({ nav, scrolled, current, onOpen }) => {
         className={`fixed top-0 inset-x-0 z-50 transition-all duration-500 ${scrolled ? 'glass py-3 shadow-lg shadow-black/40' : 'bg-transparent py-5'}`}>
         <div className="container mx-auto px-5 flex items-center justify-between">
           <div onClick={() => go('home')} className="flex items-center gap-3 cursor-pointer group">
-            <img src="/logo.png" alt="Black Amethyst Wrestling" className="logo-blend h-12 md:h-14 w-auto transition-transform duration-300 group-hover:scale-105" />
+            <img src="/logo-t.png" alt="Black Amethyst Wrestling" className="h-12 md:h-14 w-auto transition-transform duration-300 group-hover:scale-105" />
           </div>
           <nav className="hidden lg:flex items-center gap-7">
             {NAV.map((item) => {
@@ -266,10 +280,14 @@ const Navbar = ({ nav, scrolled, current, onOpen }) => {
               )
             })}
           </nav>
-          <div className="hidden lg:block">
+          <div className="hidden lg:flex items-center gap-3">
+            <CartButton />
             <GlowButton onClick={() => go('tickets')} className="!px-6 !py-2.5 text-xs"><Ticket size={14} /> Buy Tickets</GlowButton>
           </div>
-          <button className="lg:hidden text-white" onClick={() => setMenu(true)}><Menu size={26} /></button>
+          <div className="lg:hidden flex items-center gap-3">
+            <CartButton />
+            <button className="text-white" onClick={() => setMenu(true)}><Menu size={26} /></button>
+          </div>
         </div>
       </motion.header>
       <AnimatePresence>
@@ -791,7 +809,7 @@ const CheckoutModal = ({ tier, ev, onClose }) => {
 
 const TicketsPage = ({ selectedEvent, data }) => {
   const [promo, setPromo] = useState('')
-  const [checkout, setCheckout] = useState(null)
+  const cart = useCart()
   const ev = selectedEvent || data.events.find((e) => e.status !== 'coming-soon')
   return (
     <div>
@@ -825,8 +843,8 @@ const TicketsPage = ({ selectedEvent, data }) => {
                     <li key={b} className="flex items-start gap-2 text-sm text-[#BDBDBD] font-poppins font-300"><Check size={16} className="text-[#B15EFF] mt-0.5 shrink-0" /> {b}</li>
                   ))}
                 </ul>
-                <GlowButton full variant={t.popular ? 'primary' : 'outline'} className="mt-8" onClick={() => setCheckout(t)}>
-                  <Ticket size={14} /> Buy Now
+                <GlowButton full variant={t.popular ? 'primary' : 'outline'} className="mt-8" onClick={() => cart.add(t)}>
+                  <Plus size={14} /> Add to Cart
                 </GlowButton>
               </motion.div>
             ))}
@@ -859,7 +877,6 @@ const TicketsPage = ({ selectedEvent, data }) => {
           </div>
         </div>
       </section>
-      {checkout && <CheckoutModal tier={checkout} ev={ev} onClose={() => setCheckout(null)} />}
     </div>
   )
 }
@@ -1252,7 +1269,7 @@ const Footer = ({ nav }) => (
       <div className="grid md:grid-cols-4 gap-10 mb-12">
         <div>
           <div className="flex items-center gap-3 mb-4">
-            <img src="/logo.png" alt="Black Amethyst Wrestling" className="logo-blend h-20 w-auto" />
+            <img src="/logo-t.png" alt="Black Amethyst Wrestling" className="h-20 w-auto" />
           </div>
           <p className="text-sm text-[#BDBDBD] font-poppins font-300">Where raw energy meets destiny. Independent professional wrestling at its finest.</p>
           <div className="flex gap-3 mt-5">
@@ -1317,13 +1334,129 @@ const LoadingScreen = () => (
     className="fixed inset-0 z-[100] bg-[#090909] flex flex-col items-center justify-center">
     <motion.div initial={{ scale: 0.7, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} transition={{ duration: 0.9 }} className="relative pulse-glow">
       <div className="absolute inset-0 blur-3xl bg-[#6A0DAD]/50 rounded-full scale-90" />
-      <img src="/logo.png" alt="Black Amethyst Wrestling" className="logo-blend relative w-52 h-52 md:w-60 md:h-60 object-contain" />
+      <img src="/logo-t.png" alt="Black Amethyst Wrestling" className="relative w-52 h-52 md:w-60 md:h-60 object-contain" />
     </motion.div>
     <div className="mt-8 w-40 h-0.5 bg-white/10 rounded-full overflow-hidden">
       <motion.div initial={{ x: '-100%' }} animate={{ x: '100%' }} transition={{ repeat: Infinity, duration: 1.1, ease: 'easeInOut' }} className="h-full w-1/2 bg-gradient-to-r from-transparent via-[#B15EFF] to-transparent" />
     </div>
   </motion.div>
 )
+
+/* ============================= CART ============================= */
+const CartContext = createContext(null)
+const useCart = () => useContext(CartContext)
+
+const CartProvider = ({ children }) => {
+  const [items, setItems] = useState([])
+  const [open, setOpen] = useState(false)
+  const add = (t) => {
+    setItems((prev) => {
+      const ex = prev.find((i) => i.tier === t.name)
+      if (ex) return prev.map((i) => (i.tier === t.name ? { ...i, qty: Math.min(20, i.qty + 1) } : i))
+      return [...prev, { tier: t.name, price: t.price, qty: 1 }]
+    })
+    setOpen(true)
+  }
+  const setQty = (tier, qty) => setItems((prev) => (qty <= 0 ? prev.filter((i) => i.tier !== tier) : prev.map((i) => (i.tier === tier ? { ...i, qty: Math.min(20, qty) } : i))))
+  const remove = (tier) => setItems((prev) => prev.filter((i) => i.tier !== tier))
+  const clear = () => setItems([])
+  const count = items.reduce((s, i) => s + i.qty, 0)
+  const total = items.reduce((s, i) => s + i.price * i.qty, 0)
+  return <CartContext.Provider value={{ items, open, setOpen, add, setQty, remove, clear, count, total }}>{children}</CartContext.Provider>
+}
+
+const CartDrawer = ({ ev }) => {
+  const cart = useCart()
+  const [email, setEmail] = useState('')
+  const [paid, setPaid] = useState(null)
+  const [err, setErr] = useState('')
+  const clientId = process.env.NEXT_PUBLIC_PAYPAL_CLIENT_ID
+  const close = () => { cart.setOpen(false); setTimeout(() => { setPaid(null); setErr('') }, 300) }
+  return (
+    <AnimatePresence>
+      {cart.open && (
+        <>
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            onClick={close} className="fixed inset-0 z-[70] bg-black/70 backdrop-blur-sm" />
+          <motion.aside initial={{ x: '100%' }} animate={{ x: 0 }} exit={{ x: '100%' }} transition={{ type: 'tween', duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
+            className="fixed top-0 right-0 bottom-0 z-[80] w-full max-w-md bg-[#0d0d0d] border-l border-white/10 flex flex-col">
+            <div className="flex items-center justify-between p-5 border-b border-white/8">
+              <div className="flex items-center gap-2"><ShoppingCart size={20} className="text-[#B15EFF]" /><span className="font-bebas text-3xl">YOUR CART</span></div>
+              <button onClick={close} className="text-[#BDBDBD] hover:text-white"><X size={24} /></button>
+            </div>
+
+            {paid ? (
+              <div className="flex-1 flex flex-col items-center justify-center text-center px-8">
+                <div className="w-16 h-16 rounded-full bg-gradient-to-br from-[#6A0DAD] to-[#8A2BE2] glow flex items-center justify-center mb-4"><Check size={30} /></div>
+                <div className="font-bebas text-4xl amethyst-text">ORDER CONFIRMED!</div>
+                <p className="text-[#BDBDBD] font-poppins text-sm mt-2">Your tickets for {ev?.title} are confirmed. See you November 21 at Arena Tampico Madero!</p>
+                <div className="glass rounded-lg p-3 mt-4 text-xs text-[#BDBDBD] break-all">Confirmation #: {paid.captureId || paid.orderID}</div>
+                <GlowButton className="mt-6" onClick={close}>Done</GlowButton>
+              </div>
+            ) : cart.items.length === 0 ? (
+              <div className="flex-1 flex flex-col items-center justify-center text-center px-8">
+                <ShoppingCart size={44} className="text-[#BDBDBD]/40 mb-4" />
+                <div className="font-bebas text-3xl">YOUR CART IS EMPTY</div>
+                <p className="text-[#BDBDBD] font-poppins text-sm mt-2">Add tickets for the Inaugural Show to get started.</p>
+              </div>
+            ) : (
+              <>
+                <div className="flex-1 overflow-y-auto p-5 space-y-4">
+                  <div className="text-xs font-oswald uppercase tracking-widest text-[#B15EFF]">{ev?.title} · Nov 21 · Houston, TX</div>
+                  {cart.items.map((i) => (
+                    <div key={i.tier} className="glass rounded-xl p-4 flex items-center gap-3">
+                      <div className="flex-1">
+                        <div className="font-oswald uppercase tracking-wide text-sm">{i.tier}</div>
+                        <div className="text-[#B15EFF] font-bebas text-xl">${i.price} <span className="text-[#BDBDBD] text-xs font-poppins">each</span></div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <button onClick={() => cart.setQty(i.tier, i.qty - 1)} className="w-8 h-8 rounded-md glass flex items-center justify-center"><Minus size={14} /></button>
+                        <span className="font-bebas text-lg w-6 text-center">{i.qty}</span>
+                        <button onClick={() => cart.setQty(i.tier, i.qty + 1)} className="w-8 h-8 rounded-md glass flex items-center justify-center"><Plus size={14} /></button>
+                      </div>
+                      <button onClick={() => cart.remove(i.tier)} className="text-[#BDBDBD] hover:text-red-400 ml-1"><Trash2 size={16} /></button>
+                    </div>
+                  ))}
+                </div>
+                <div className="p-5 border-t border-white/8 space-y-3">
+                  <div className="flex justify-between items-center font-bebas text-3xl">
+                    <span>TOTAL</span><span className="amethyst-text">${cart.total.toFixed(2)}</span>
+                  </div>
+                  <Input value={email} onChange={(e) => setEmail(e.target.value)} type="email" placeholder="Email for your receipt"
+                    className="bg-white/5 border-white/10 h-11 text-white placeholder:text-[#BDBDBD]/60" />
+                  {err && <div className="text-red-400 text-sm font-poppins">{err}</div>}
+                  {clientId ? (
+                    <PayPalScriptProvider options={{ clientId, currency: 'USD', intent: 'capture', components: 'buttons', enableFunding: 'venmo,card' }}>
+                      <PayPalButtons
+                        style={{ layout: 'vertical', color: 'gold', shape: 'rect', label: 'paypal', height: 45 }}
+                        forceReRender={[cart.total, cart.count]}
+                        createOrder={async () => {
+                          setErr('')
+                          const r = await fetch('/api/paypal/create-order', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ items: cart.items.map((i) => ({ tier: i.tier, qty: i.qty })), email, eventId: ev?.id }) })
+                          const d = await r.json()
+                          if (!d.orderID) { setErr('Could not start checkout. Please try again.'); throw new Error('no order id') }
+                          return d.orderID
+                        }}
+                        onApprove={async (data) => {
+                          const r = await fetch('/api/paypal/capture-order', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ orderID: data.orderID }) })
+                          const d = await r.json()
+                          if (d.status === 'COMPLETED') { setPaid(d); cart.clear() }
+                          else setErr('Payment could not be completed.')
+                        }}
+                        onError={(e) => { console.error('PayPal error', e); setErr('A payment error occurred. Please try again.') }}
+                      />
+                    </PayPalScriptProvider>
+                  ) : <div className="text-sm text-[#BDBDBD] text-center py-2">Payments are being configured.</div>}
+                  <p className="text-[10px] text-[#BDBDBD] text-center font-poppins">Secure checkout · PayPal, Venmo, or credit/debit card.</p>
+                </div>
+              </>
+            )}
+          </motion.aside>
+        </>
+      )}
+    </AnimatePresence>
+  )
+}
 
 /* ============================= APP ============================= */
 export default function App() {
@@ -1380,8 +1513,10 @@ export default function App() {
     }
   }
 
+  const onSaleEvent = data.events.find((e) => e.status !== 'coming-soon')
+
   return (
-    <>
+    <CartProvider>
       <GlobalStyles />
       <AnimatePresence>{loading && <LoadingScreen />}</AnimatePresence>
 
@@ -1418,6 +1553,8 @@ export default function App() {
           </motion.button>
         )}
       </AnimatePresence>
-    </>
+
+      <CartDrawer ev={onSaleEvent} />
+    </CartProvider>
   )
 }

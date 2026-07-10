@@ -318,13 +318,21 @@ async function handleRoute(request, { params }) {
     // PayPal: create order
     if (route === '/paypal/create-order' && method === 'POST') {
       const body = await request.json()
-      const tier = body.tier
-      const qty = Math.max(1, Math.min(20, parseInt(body.qty) || 1))
-      const unit = TICKET_PRICING[tier]
-      if (!unit) return handleCORS(NextResponse.json({ error: 'Invalid ticket tier' }, { status: 400 }))
-      const total = (unit * qty).toFixed(2)
+      const rawItems = Array.isArray(body.items) && body.items.length
+        ? body.items
+        : (body.tier ? [{ tier: body.tier, qty: body.qty }] : [])
+      const lineItems = []
+      for (const it of rawItems) {
+        const unit = TICKET_PRICING[it.tier]
+        if (!unit) return handleCORS(NextResponse.json({ error: `Invalid ticket tier: ${it.tier}` }, { status: 400 }))
+        const q = Math.max(1, Math.min(20, parseInt(it.qty) || 1))
+        lineItems.push({ tier: it.tier, qty: q, unit, amount: unit * q })
+      }
+      if (!lineItems.length) return handleCORS(NextResponse.json({ error: 'Cart is empty' }, { status: 400 }))
+      const totalNum = lineItems.reduce((s, i) => s + i.amount, 0)
+      const total = totalNum.toFixed(2)
       const orderDoc = {
-        id: uuidv4(), tier, qty, unit, amount: Number(total),
+        id: uuidv4(), items: lineItems, amount: totalNum,
         email: body.email || '', eventId: body.eventId || 'inaugural-show',
         status: 'pending', createdAt: new Date(),
       }
@@ -336,17 +344,17 @@ async function handleRoute(request, { params }) {
           intent: 'CAPTURE',
           purchase_units: [{
             custom_id: orderDoc.id,
-            description: `BAW ${tier} x${qty} - Inaugural Show`.slice(0, 127),
+            description: `BAW Inaugural Show Tickets`.slice(0, 127),
             amount: {
               currency_code: 'USD',
               value: total,
               breakdown: { item_total: { currency_code: 'USD', value: total } },
             },
-            items: [{
-              name: `${tier} Ticket`.slice(0, 127),
-              quantity: String(qty),
-              unit_amount: { currency_code: 'USD', value: unit.toFixed(2) },
-            }],
+            items: lineItems.map((i) => ({
+              name: `${i.tier} Ticket`.slice(0, 127),
+              quantity: String(i.qty),
+              unit_amount: { currency_code: 'USD', value: i.unit.toFixed(2) },
+            })),
           }],
           application_context: { brand_name: 'Black Amethyst Wrestling', shipping_preference: 'NO_SHIPPING', user_action: 'PAY_NOW' },
         }),
