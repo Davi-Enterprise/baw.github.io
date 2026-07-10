@@ -1094,9 +1094,9 @@ const MediaPage = ({ data }) => {
 }
 
 /* ============================= NEWS PAGE ============================= */
-const NEWS_CATS = ['All', 'Announcements', 'Results', 'Interviews', 'Events', 'Press Releases']
 const NewsPage = ({ data }) => {
   const [cat, setCat] = useState('All')
+  const NEWS_CATS = ['All', ...Array.from(new Set(data.news.map((n) => n.category).filter(Boolean)))]
   const list = cat === 'All' ? data.news : data.news.filter((n) => n.category === cat)
   return (
     <div>

@@ -212,12 +212,15 @@ function seedWrestlers() {
 
 function seedNews() {
   return [
-    { id: 'era-begins', category: 'Announcements', title: 'A New Era Begins: Black Amethyst Wrestling Announces Nationwide Tour', excerpt: 'BAW unveils an ambitious cross-country tour bringing premium sports entertainment to arenas nationwide.', date: daysFromNow(-2), image: IMG.ringB, author: 'BAW Media' },
-    { id: 'voss-reign', category: 'Results', title: 'The Obsidian King Extends Historic Championship Reign', excerpt: 'Kane Voss overcomes a brutal challenge to defend the World Heavyweight Championship in a match for the ages.', date: daysFromNow(-6), image: IMG.ringA, author: 'BAW Media' },
-    { id: 'nightshade-interview', category: 'Interviews', title: 'Nightshade Speaks: "I Was Born To Rule This Division"', excerpt: 'The Women\'s Champion opens up about her journey, her rivals, and what comes next.', date: daysFromNow(-9), image: IMG.wf1, author: 'BAW Media' },
-    { id: 'amethyst-rising-card', category: 'Events', title: 'Full Match Card Revealed For Amethyst Rising', excerpt: 'Four championship-caliber bouts headline the flagship event. Here is everything you need to know.', date: daysFromNow(-11), image: IMG.fog, author: 'BAW Media' },
-    { id: 'signing', category: 'Press Releases', title: 'BAW Signs Multi-Year Broadcast Partnership', excerpt: 'A landmark deal that brings Black Amethyst Wrestling to millions of new fans.', date: daysFromNow(-15), image: IMG.crowd, author: 'BAW Media' },
-    { id: 'twins-dominate', category: 'Results', title: 'The Amethyst Twins Remain Untouchable In Tag Division', excerpt: 'The Gemini Dynasty turns back another challenge in dominant fashion.', date: daysFromNow(-19), image: IMG.w3, author: 'BAW Media' },
+    {
+      id: 'inaugural-announcement',
+      category: 'Announcements',
+      title: 'Our Inaugural Show — November 21 in Houston',
+      excerpt: "We are so excited to announce the very first Black Amethyst Wrestling show, live on November 21st at Arena Tampico Madero, 11620 Almeda Genoa Rd, Houston, TX 77034. This is the exciting beginning of a long, long story we can't wait to build together for generations to come. Our roster for this historic night features TJ Slater, Arik Walker, D'Angelo Le Flame, Alex Rey, Big Haus, DRACO, James Derek, and Rakzo Moreno. Doors open at 6:00 PM and the show starts at 7:00 PM. Tickets are First Row $30, General Admission $20, and Kids just $10. Bring your family and friends and be part of history with us. We can't wait to see everybody there — see you November 21st!",
+      date: daysFromNow(-1),
+      image: '/inaugural-poster.png',
+      author: 'Black Amethyst Wrestling',
+    },
   ]
 }
 
