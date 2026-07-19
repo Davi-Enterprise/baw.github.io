@@ -2,6 +2,11 @@ import { MongoClient } from 'mongodb'
 import { v4 as uuidv4 } from 'uuid'
 import { NextResponse } from 'next/server'
 import { readFile } from 'fs/promises'
+import assetData from '../../lib/asset-data.json'
+
+// Force Node.js runtime (Buffer / filesystem) rather than edge
+export const runtime = 'nodejs'
+export const dynamic = 'force-dynamic'
 
 // MongoDB connection (cached promise to avoid parallel-request race)
 let clientPromise
@@ -236,6 +241,22 @@ async function ensureSeed(db) {
   await seedColl('events', seedEvents())
   await seedColl('wrestlers', seedWrestlers())
   await seedColl('news', seedNews())
+  await seedAssets(db)
+}
+
+// Store image bytes in MongoDB from the bundled base64 module (deployment-proof source)
+async function seedAssets(db) {
+  try {
+    const names = Object.keys(assetData || {})
+    const ops = names.map((filename) => ({
+      updateOne: {
+        filter: { filename },
+        update: { $set: { filename, contentType: assetData[filename].contentType, data: assetData[filename].data } },
+        upsert: true,
+      },
+    }))
+    if (ops.length) await db.collection('assets').bulkWrite(ops, { ordered: false })
+  } catch (e) { /* non-fatal: bundled module still serves images */ }
 }
 
 function clean(arr) {
@@ -248,21 +269,40 @@ async function handleRoute(request, { params }) {
   const method = request.method
 
   try {
-    // Serve static image assets via API (production may not serve /public directly)
+    // Serve static image assets via API (production may not serve /public directly).
+    // Priority: bundled base64 module (always deployed with code) -> DB -> filesystem.
     if (path[0] === 'asset' && method === 'GET') {
       const name = path.slice(1).join('/').replace(/\.\.+/g, '').replace(/[^a-zA-Z0-9._-]/g, '')
       const ext = (name.split('.').pop() || '').toLowerCase()
       const types = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', webp: 'image/webp', gif: 'image/gif', svg: 'image/svg+xml' }
+      const send = (buf, ct) => new NextResponse(buf, {
+        status: 200,
+        headers: {
+          'Content-Type': ct || types[ext] || 'application/octet-stream',
+          'Cache-Control': 'public, max-age=31536000, immutable',
+          'Access-Control-Allow-Origin': '*',
+        },
+      })
+
+      // 1) Bundled module (deployment-proof)
+      const bundled = assetData[name]
+      if (bundled && bundled.data) {
+        return send(Buffer.from(bundled.data, 'base64'), bundled.contentType)
+      }
+
+      // 2) MongoDB assets collection
+      try {
+        const db = await connectToMongo()
+        const doc = await db.collection('assets').findOne({ filename: name })
+        if (doc && doc.data) {
+          return send(Buffer.from(doc.data, 'base64'), doc.contentType)
+        }
+      } catch (e) { /* fall through */ }
+
+      // 3) Filesystem (works in local/preview)
       try {
         const buf = await readFile(process.cwd() + '/public/' + name)
-        return new NextResponse(buf, {
-          status: 200,
-          headers: {
-            'Content-Type': types[ext] || 'application/octet-stream',
-            'Cache-Control': 'public, max-age=31536000, immutable',
-            'Access-Control-Allow-Origin': '*',
-          },
-        })
+        return send(buf)
       } catch (e) {
         return handleCORS(NextResponse.json({ error: 'asset not found' }, { status: 404 }))
       }
