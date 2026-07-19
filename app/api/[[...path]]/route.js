@@ -1,6 +1,7 @@
 import { MongoClient } from 'mongodb'
 import { v4 as uuidv4 } from 'uuid'
 import { NextResponse } from 'next/server'
+import { readFile } from 'fs/promises'
 
 // MongoDB connection (cached promise to avoid parallel-request race)
 let clientPromise
@@ -77,7 +78,7 @@ function seedEvents() {
       venue: 'Arena Tampico Madero',
       location: 'Houston, TX',
       address: '11620 Almeda Genoa Rd, Houston, TX 77034',
-      poster: '/inaugural-poster.png',
+      poster: '/api/asset/inaugural-poster.png',
       banner: IMG.ringA,
       status: 'on-sale',
       featured: true,
@@ -199,14 +200,14 @@ function seedEvents() {
 
 function seedWrestlers() {
   return [
-    { id: 'tj-slater', name: 'TJ SLATER', category: 'men', champion: false, image: '/tj-slater.png', showName: false },
-    { id: 'arik-walker', name: 'ARIK WALKER', category: 'men', champion: false, image: '/arik-walker.png', showName: false },
-    { id: 'dangelo-leflame', name: "D'ANGELO LE FLAME", category: 'men', champion: false, image: '/dangelo-leflame.png', showName: false },
-    { id: 'alex-rey', name: 'ALEX REY', category: 'men', champion: false, image: '/alex-rey.png', showName: false },
-    { id: 'big-haus', name: 'BIG HAUS', category: 'men', champion: false, image: '/big-haus.jpeg', showName: false },
-    { id: 'draco', name: 'DRACO', nickname: 'The Last Dragon', category: 'men', champion: false, image: '/draco.png', showName: false },
-    { id: 'james-derek', name: 'JAMES DEREK', nickname: 'Da Product', category: 'men', champion: false, image: '/james-derek.webp', showName: false },
-    { id: 'rakzo-moreno', name: 'RAKZO MORENO', category: 'men', champion: false, image: '/rakzo-moreno.webp', showName: false },
+    { id: 'tj-slater', name: 'TJ SLATER', category: 'men', champion: false, image: '/api/asset/tj-slater.png', showName: false },
+    { id: 'arik-walker', name: 'ARIK WALKER', category: 'men', champion: false, image: '/api/asset/arik-walker.png', showName: false },
+    { id: 'dangelo-leflame', name: "D'ANGELO LE FLAME", category: 'men', champion: false, image: '/api/asset/dangelo-leflame.png', showName: false },
+    { id: 'alex-rey', name: 'ALEX REY', category: 'men', champion: false, image: '/api/asset/alex-rey.png', showName: false },
+    { id: 'big-haus', name: 'BIG HAUS', category: 'men', champion: false, image: '/api/asset/big-haus.jpeg', showName: false },
+    { id: 'draco', name: 'DRACO', nickname: 'The Last Dragon', category: 'men', champion: false, image: '/api/asset/draco.png', showName: false },
+    { id: 'james-derek', name: 'JAMES DEREK', nickname: 'Da Product', category: 'men', champion: false, image: '/api/asset/james-derek.webp', showName: false },
+    { id: 'rakzo-moreno', name: 'RAKZO MORENO', category: 'men', champion: false, image: '/api/asset/rakzo-moreno.webp', showName: false },
   ]
 }
 
@@ -218,7 +219,7 @@ function seedNews() {
       title: 'Our Inaugural Show — November 21 in Houston',
       excerpt: "We are so excited to announce the very first Black Amethyst Wrestling show, live on November 21st at Arena Tampico Madero, 11620 Almeda Genoa Rd, Houston, TX 77034. This is the exciting beginning of a long, long story we can't wait to build together for generations to come. Our roster for this historic night features TJ Slater, Arik Walker, D'Angelo Le Flame, Alex Rey, Big Haus, DRACO, James Derek, and Rakzo Moreno. Doors open at 6:00 PM and the show starts at 7:00 PM. Tickets are First Row $30, General Admission $20, and Kids just $10. Bring your family and friends and be part of history with us. We can't wait to see everybody there — see you November 21st!",
       date: daysFromNow(-1),
-      image: '/inaugural-poster.png',
+      image: '/api/asset/inaugural-poster.png',
       author: 'Black Amethyst Wrestling',
     },
   ]
@@ -247,6 +248,26 @@ async function handleRoute(request, { params }) {
   const method = request.method
 
   try {
+    // Serve static image assets via API (production may not serve /public directly)
+    if (path[0] === 'asset' && method === 'GET') {
+      const name = path.slice(1).join('/').replace(/\.\.+/g, '').replace(/[^a-zA-Z0-9._-]/g, '')
+      const ext = (name.split('.').pop() || '').toLowerCase()
+      const types = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', webp: 'image/webp', gif: 'image/gif', svg: 'image/svg+xml' }
+      try {
+        const buf = await readFile(process.cwd() + '/public/' + name)
+        return new NextResponse(buf, {
+          status: 200,
+          headers: {
+            'Content-Type': types[ext] || 'application/octet-stream',
+            'Cache-Control': 'public, max-age=31536000, immutable',
+            'Access-Control-Allow-Origin': '*',
+          },
+        })
+      } catch (e) {
+        return handleCORS(NextResponse.json({ error: 'asset not found' }, { status: 404 }))
+      }
+    }
+
     const db = await connectToMongo()
     await ensureSeed(db)
 

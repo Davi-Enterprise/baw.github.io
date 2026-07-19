@@ -266,7 +266,7 @@ const Navbar = ({ nav, scrolled, current, onOpen }) => {
         className={`fixed top-0 inset-x-0 z-50 transition-all duration-500 ${scrolled ? 'glass py-3 shadow-lg shadow-black/40' : 'bg-transparent py-5'}`}>
         <div className="container mx-auto px-5 flex items-center justify-between">
           <div onClick={() => go('home')} className="flex items-center gap-3 cursor-pointer group">
-            <img src="/logo-t.png" alt="Black Amethyst Wrestling" className="h-12 md:h-14 w-auto transition-transform duration-300 group-hover:scale-105" />
+            <img src="/api/asset/logo-t.png" alt="Black Amethyst Wrestling" className="h-12 md:h-14 w-auto transition-transform duration-300 group-hover:scale-105" />
           </div>
           <nav className="hidden lg:flex items-center gap-7">
             {NAV.map((item) => {
@@ -593,7 +593,7 @@ const EventsPage = ({ data, onOpenEvent, onTickets }) => (
         <div className="mt-24 grid lg:grid-cols-2 gap-12 items-center">
           <motion.div variants={reveal} initial="hidden" whileInView="show" viewport={{ once: true }}
             className="relative rounded-2xl overflow-hidden glow border border-white/8 max-w-sm mx-auto">
-            <img src="/schedule-poster.jpeg" alt="Black Amethyst Wrestling 2026-2027 Event Schedule" className="w-full h-auto" />
+            <img src="/api/asset/schedule-poster.jpeg" alt="Black Amethyst Wrestling 2026-2027 Event Schedule" className="w-full h-auto" />
           </motion.div>
           <motion.div variants={reveal} initial="hidden" whileInView="show" viewport={{ once: true }}>
             <div className="font-oswald uppercase tracking-[0.4em] text-xs text-[#B15EFF] mb-3">2026 — 2027 Season</div>
@@ -1269,7 +1269,7 @@ const Footer = ({ nav }) => (
       <div className="grid md:grid-cols-4 gap-10 mb-12">
         <div>
           <div className="flex items-center gap-3 mb-4">
-            <img src="/logo-t.png" alt="Black Amethyst Wrestling" className="h-20 w-auto" />
+            <img src="/api/asset/logo-t.png" alt="Black Amethyst Wrestling" className="h-20 w-auto" />
           </div>
           <p className="text-sm text-[#BDBDBD] font-poppins font-300">Where raw energy meets destiny. Independent professional wrestling at its finest.</p>
           <div className="flex gap-3 mt-5">
@@ -1334,7 +1334,7 @@ const LoadingScreen = () => (
     className="fixed inset-0 z-[100] bg-[#090909] flex flex-col items-center justify-center">
     <motion.div initial={{ scale: 0.7, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} transition={{ duration: 0.9 }} className="relative pulse-glow">
       <div className="absolute inset-0 blur-3xl bg-[#6A0DAD]/50 rounded-full scale-90" />
-      <img src="/logo-t.png" alt="Black Amethyst Wrestling" className="relative w-52 h-52 md:w-60 md:h-60 object-contain" />
+      <img src="/api/asset/logo-t.png" alt="Black Amethyst Wrestling" className="relative w-52 h-52 md:w-60 md:h-60 object-contain" />
     </motion.div>
     <div className="mt-8 w-40 h-0.5 bg-white/10 rounded-full overflow-hidden">
       <motion.div initial={{ x: '-100%' }} animate={{ x: '100%' }} transition={{ repeat: Infinity, duration: 1.1, ease: 'easeInOut' }} className="h-full w-1/2 bg-gradient-to-r from-transparent via-[#B15EFF] to-transparent" />
