@@ -1,295 +1,704 @@
 #!/usr/bin/env python3
 """
-Backend API Test Suite for Black Amethyst Wrestling
-Tests the reworked ASSET DELIVERY route and regression tests
+Backend API Test Suite for Black Amethyst Wrestling - Admin Content Manager
+Tests admin auth, Instagram posts, Stories, News, and promote functionality
 """
-
 import requests
+import json
 import sys
-import os
-from pymongo import MongoClient
+from typing import Dict, Any, Optional
 
-# Get base URL from environment
-BASE_URL = os.getenv('NEXT_PUBLIC_BASE_URL', 'https://baw-elite.preview.emergentagent.com')
-API_BASE = f"{BASE_URL}/api"
+# Base URL from environment
+BASE_URL = "https://baw-elite.preview.emergentagent.com/api"
+ADMIN_PASSWORD = "BAW-Amethyst-2026"
 
-# MongoDB connection
-MONGO_URL = os.getenv('MONGO_URL', 'mongodb://localhost:27017')
-DB_NAME = os.getenv('DB_NAME', 'your_database_name')
+# Small 1x1 PNG base64 for testing (red pixel)
+TEST_IMAGE_BASE64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg=="
 
-print(f"Testing against: {API_BASE}")
-print(f"MongoDB: {MONGO_URL}/{DB_NAME}")
-print("=" * 80)
-
-# Test results tracking
-tests_passed = 0
-tests_failed = 0
+# Test state
 test_results = []
+created_resources = {
+    "instagram_posts": [],
+    "stories": [],
+    "news": []
+}
 
-def test_result(test_name, passed, message=""):
-    global tests_passed, tests_failed
-    if passed:
-        tests_passed += 1
-        status = "✅ PASS"
-    else:
-        tests_failed += 1
-        status = "❌ FAIL"
-    result = f"{status}: {test_name}"
-    if message:
-        result += f" - {message}"
-    print(result)
-    test_results.append((test_name, passed, message))
-    return passed
+def log_test(name: str, passed: bool, details: str = ""):
+    """Log test result"""
+    status = "✅ PASS" if passed else "❌ FAIL"
+    test_results.append({"name": name, "passed": passed, "details": details})
+    print(f"{status}: {name}")
+    if details:
+        print(f"  Details: {details}")
 
-print("\n" + "=" * 80)
-print("TEST 1: Asset Delivery - 11 Required Files")
-print("=" * 80)
-
-# List of required assets with expected content types
-required_assets = [
-    ("logo-t.png", "image/png"),
-    ("tj-slater.png", "image/jpeg"),
-    ("arik-walker.png", "image/jpeg"),
-    ("dangelo-leflame.png", "image/jpeg"),
-    ("alex-rey.png", "image/jpeg"),
-    ("draco.png", "image/jpeg"),
-    ("inaugural-poster.png", "image/jpeg"),
-    ("big-haus.jpeg", "image/jpeg"),
-    ("schedule-poster.jpeg", "image/jpeg"),
-    ("james-derek.webp", "image/jpeg"),
-    ("rakzo-moreno.webp", "image/jpeg"),
-]
-
-asset_test_results = []
-
-for filename, expected_content_type in required_assets:
+def test_admin_login_correct_password():
+    """Test admin login with correct password"""
     try:
-        url = f"{API_BASE}/asset/{filename}"
+        response = requests.post(
+            f"{BASE_URL}/admin/login",
+            json={"password": ADMIN_PASSWORD},
+            timeout=10
+        )
+        
+        if response.status_code == 200:
+            data = response.json()
+            if "token" in data and data["token"]:
+                log_test("Admin login with correct password", True, f"Token received: {data['token'][:20]}...")
+                return data["token"]
+            else:
+                log_test("Admin login with correct password", False, "No token in response")
+                return None
+        else:
+            log_test("Admin login with correct password", False, f"Status {response.status_code}: {response.text}")
+            return None
+    except Exception as e:
+        log_test("Admin login with correct password", False, f"Exception: {str(e)}")
+        return None
+
+def test_admin_login_wrong_password():
+    """Test admin login with wrong password"""
+    try:
+        response = requests.post(
+            f"{BASE_URL}/admin/login",
+            json={"password": "wrong-password-123"},
+            timeout=10
+        )
+        
+        if response.status_code == 401:
+            log_test("Admin login with wrong password returns 401", True, "Correctly rejected")
+            return True
+        else:
+            log_test("Admin login with wrong password returns 401", False, f"Expected 401, got {response.status_code}")
+            return False
+    except Exception as e:
+        log_test("Admin login with wrong password returns 401", False, f"Exception: {str(e)}")
+        return False
+
+def test_admin_me_with_token(token: str):
+    """Test GET /api/admin/me with valid token"""
+    try:
+        response = requests.get(
+            f"{BASE_URL}/admin/me",
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=10
+        )
+        
+        if response.status_code == 200:
+            data = response.json()
+            if data.get("authenticated") == True:
+                log_test("GET /admin/me with valid token", True, "authenticated: true")
+                return True
+            else:
+                log_test("GET /admin/me with valid token", False, f"authenticated: {data.get('authenticated')}")
+                return False
+        else:
+            log_test("GET /admin/me with valid token", False, f"Status {response.status_code}")
+            return False
+    except Exception as e:
+        log_test("GET /admin/me with valid token", False, f"Exception: {str(e)}")
+        return False
+
+def test_admin_me_without_token():
+    """Test GET /api/admin/me without token"""
+    try:
+        response = requests.get(
+            f"{BASE_URL}/admin/me",
+            timeout=10
+        )
+        
+        if response.status_code == 200:
+            data = response.json()
+            if data.get("authenticated") == False:
+                log_test("GET /admin/me without token", True, "authenticated: false")
+                return True
+            else:
+                log_test("GET /admin/me without token", False, f"authenticated: {data.get('authenticated')}")
+                return False
+        else:
+            log_test("GET /admin/me without token", False, f"Status {response.status_code}")
+            return False
+    except Exception as e:
+        log_test("GET /admin/me without token", False, f"Exception: {str(e)}")
+        return False
+
+def test_admin_me_with_invalid_token():
+    """Test GET /api/admin/me with invalid token"""
+    try:
+        response = requests.get(
+            f"{BASE_URL}/admin/me",
+            headers={"Authorization": "Bearer invalid-token-12345"},
+            timeout=10
+        )
+        
+        if response.status_code == 200:
+            data = response.json()
+            if data.get("authenticated") == False:
+                log_test("GET /admin/me with invalid token", True, "authenticated: false")
+                return True
+            else:
+                log_test("GET /admin/me with invalid token", False, f"authenticated: {data.get('authenticated')}")
+                return False
+        else:
+            log_test("GET /admin/me with invalid token", False, f"Status {response.status_code}")
+            return False
+    except Exception as e:
+        log_test("GET /admin/me with invalid token", False, f"Exception: {str(e)}")
+        return False
+
+def test_create_instagram_post_without_token():
+    """Test POST /api/admin/instagram without token"""
+    try:
+        response = requests.post(
+            f"{BASE_URL}/admin/instagram",
+            json={
+                "link": "https://instagram.com/test",
+                "caption": "Test post",
+                "imageBase64": TEST_IMAGE_BASE64,
+                "contentType": "image/png"
+            },
+            timeout=10
+        )
+        
+        if response.status_code == 401:
+            log_test("POST /admin/instagram without token returns 401", True, "Correctly rejected")
+            return True
+        else:
+            log_test("POST /admin/instagram without token returns 401", False, f"Expected 401, got {response.status_code}")
+            return False
+    except Exception as e:
+        log_test("POST /admin/instagram without token returns 401", False, f"Exception: {str(e)}")
+        return False
+
+def test_create_instagram_post_with_token(token: str):
+    """Test POST /api/admin/instagram with valid token and image"""
+    try:
+        response = requests.post(
+            f"{BASE_URL}/admin/instagram",
+            headers={"Authorization": f"Bearer {token}"},
+            json={
+                "link": "https://instagram.com/blackamethystwrestling",
+                "caption": "Test Instagram post from automated testing\nThis is a test caption for the admin content manager.",
+                "imageBase64": TEST_IMAGE_BASE64,
+                "contentType": "image/png"
+            },
+            timeout=10
+        )
+        
+        if response.status_code == 200:
+            data = response.json()
+            if "id" in data and "image" in data:
+                if data["image"].startswith("/api/asset/ig-"):
+                    created_resources["instagram_posts"].append(data["id"])
+                    log_test("POST /admin/instagram with token and image", True, 
+                            f"Created post {data['id']}, image: {data['image']}")
+                    return data
+                else:
+                    log_test("POST /admin/instagram with token and image", False, 
+                            f"Image path doesn't start with /api/asset/ig-: {data['image']}")
+                    return None
+            else:
+                log_test("POST /admin/instagram with token and image", False, "Missing id or image in response")
+                return None
+        else:
+            log_test("POST /admin/instagram with token and image", False, 
+                    f"Status {response.status_code}: {response.text}")
+            return None
+    except Exception as e:
+        log_test("POST /admin/instagram with token and image", False, f"Exception: {str(e)}")
+        return None
+
+def test_get_instagram_post_image(image_path: str):
+    """Test GET on the returned image path"""
+    try:
+        # Remove /api prefix if present since BASE_URL already has it
+        if image_path.startswith("/api/"):
+            image_path = image_path[4:]  # Remove /api
+        
+        url = f"{BASE_URL}{image_path}"
         response = requests.get(url, timeout=10)
         
-        # Check status code
-        status_ok = response.status_code == 200
-        
-        # Check content type
-        content_type = response.headers.get('Content-Type', '')
-        content_type_ok = content_type.startswith('image/')
-        
-        # Check body size (should be > 1KB)
-        body_size = len(response.content)
-        size_ok = body_size > 1024
-        
-        all_ok = status_ok and content_type_ok and size_ok
-        
-        if all_ok:
-            message = f"Status: {response.status_code}, Type: {content_type}, Size: {body_size} bytes"
+        if response.status_code == 200:
+            content_type = response.headers.get("Content-Type", "")
+            if content_type.startswith("image/"):
+                log_test("GET Instagram post image", True, 
+                        f"Image retrieved, Content-Type: {content_type}, Size: {len(response.content)} bytes")
+                return True
+            else:
+                log_test("GET Instagram post image", False, f"Wrong Content-Type: {content_type}")
+                return False
         else:
-            issues = []
-            if not status_ok:
-                issues.append(f"Status: {response.status_code}")
-            if not content_type_ok:
-                issues.append(f"Type: {content_type}")
-            if not size_ok:
-                issues.append(f"Size: {body_size} bytes")
-            message = ", ".join(issues)
-        
-        test_result(f"Asset: {filename}", all_ok, message)
-        asset_test_results.append((filename, all_ok))
-        
+            log_test("GET Instagram post image", False, f"Status {response.status_code}")
+            return False
     except Exception as e:
-        test_result(f"Asset: {filename}", False, f"Exception: {str(e)}")
-        asset_test_results.append((filename, False))
+        log_test("GET Instagram post image", False, f"Exception: {str(e)}")
+        return False
 
-print("\n" + "=" * 80)
-print("TEST 2: Non-existent Asset (404)")
-print("=" * 80)
-
-try:
-    url = f"{API_BASE}/asset/does-not-exist.png"
-    response = requests.get(url, timeout=10)
-    
-    is_404 = response.status_code == 404
-    test_result("Non-existent asset returns 404", is_404, f"Status: {response.status_code}")
-    
-except Exception as e:
-    test_result("Non-existent asset returns 404", False, f"Exception: {str(e)}")
-
-print("\n" + "=" * 80)
-print("TEST 3: Path Traversal Safety")
-print("=" * 80)
-
-try:
-    url = f"{API_BASE}/asset/../package.json"
-    response = requests.get(url, timeout=10)
-    
-    # Should return 404 or not return package.json content
-    is_safe = response.status_code == 404 or 'package.json' not in response.text
-    
-    if response.status_code == 404:
-        message = "Returns 404 (safe)"
-    elif 'package.json' in response.text:
-        message = "⚠️ SECURITY ISSUE: Returns package.json content"
-    else:
-        message = f"Returns {response.status_code} with no sensitive data"
-    
-    test_result("Path traversal blocked", is_safe, message)
-    
-except Exception as e:
-    test_result("Path traversal blocked", False, f"Exception: {str(e)}")
-
-print("\n" + "=" * 80)
-print("TEST 4: MongoDB Assets Collection Seeding")
-print("=" * 80)
-
-try:
-    # First, trigger seeding by calling /api/events
-    events_url = f"{API_BASE}/events"
-    events_response = requests.get(events_url, timeout=10)
-    
-    if events_response.status_code != 200:
-        test_result("Trigger seeding via /api/events", False, f"Status: {events_response.status_code}")
-    else:
-        test_result("Trigger seeding via /api/events", True, "Status: 200")
-    
-    # Connect to MongoDB
-    client = MongoClient(MONGO_URL)
-    db = client[DB_NAME]
-    
-    # Check assets collection
-    assets_count = db.assets.count_documents({})
-    
-    has_11_assets = assets_count == 11
-    test_result("MongoDB assets collection has 11 documents", has_11_assets, f"Count: {assets_count}")
-    
-    # Verify each asset has required fields
-    if assets_count > 0:
-        sample_asset = db.assets.find_one()
-        has_fields = all(field in sample_asset for field in ['filename', 'contentType', 'data'])
-        test_result("Assets have required fields (filename, contentType, data)", has_fields, 
-                   f"Fields: {list(sample_asset.keys())}")
-    
-    client.close()
-    
-except Exception as e:
-    test_result("MongoDB assets collection check", False, f"Exception: {str(e)}")
-
-print("\n" + "=" * 80)
-print("TEST 5: Regression - Events API")
-print("=" * 80)
-
-try:
-    url = f"{API_BASE}/events"
-    response = requests.get(url, timeout=10)
-    
-    status_ok = response.status_code == 200
-    test_result("GET /api/events returns 200", status_ok, f"Status: {response.status_code}")
-    
-    if status_ok:
-        events = response.json()
+def test_create_instagram_post_without_image(token: str):
+    """Test POST /api/admin/instagram without image"""
+    try:
+        response = requests.post(
+            f"{BASE_URL}/admin/instagram",
+            headers={"Authorization": f"Bearer {token}"},
+            json={
+                "link": "https://instagram.com/test",
+                "caption": "Test post without image"
+            },
+            timeout=10
+        )
         
-        # Check count
-        has_6_events = len(events) == 6
-        test_result("Returns 6 events", has_6_events, f"Count: {len(events)}")
+        if response.status_code == 400:
+            log_test("POST /admin/instagram without image returns 400", True, "Correctly rejected")
+            return True
+        else:
+            log_test("POST /admin/instagram without image returns 400", False, 
+                    f"Expected 400, got {response.status_code}: {response.text}")
+            return False
+    except Exception as e:
+        log_test("POST /admin/instagram without image returns 400", False, f"Exception: {str(e)}")
+        return False
+
+def test_get_public_instagram_posts(expected_post_id: str):
+    """Test GET /api/instagram (public endpoint)"""
+    try:
+        response = requests.get(f"{BASE_URL}/instagram", timeout=10)
         
-        # Check first event is inaugural-show
-        if len(events) > 0:
-            first_is_inaugural = events[0].get('id') == 'inaugural-show'
-            test_result("First event is 'inaugural-show'", first_is_inaugural, 
-                       f"First ID: {events[0].get('id')}")
-            
-            # Check status
-            first_status = events[0].get('status') == 'on-sale'
-            test_result("First event status is 'on-sale'", first_status, 
-                       f"Status: {events[0].get('status')}")
+        if response.status_code == 200:
+            data = response.json()
+            if isinstance(data, list):
+                # Check if our created post is in the list
+                found = any(post.get("id") == expected_post_id for post in data)
+                if found:
+                    log_test("GET /instagram includes created post", True, 
+                            f"Found post {expected_post_id} in {len(data)} posts")
+                    return True
+                else:
+                    log_test("GET /instagram includes created post", False, 
+                            f"Post {expected_post_id} not found in {len(data)} posts")
+                    return False
+            else:
+                log_test("GET /instagram includes created post", False, "Response is not an array")
+                return False
+        else:
+            log_test("GET /instagram includes created post", False, f"Status {response.status_code}")
+            return False
+    except Exception as e:
+        log_test("GET /instagram includes created post", False, f"Exception: {str(e)}")
+        return False
+
+def test_promote_instagram_post(token: str, post_id: str):
+    """Test POST /api/admin/instagram/:id/promote"""
+    try:
+        response = requests.post(
+            f"{BASE_URL}/admin/instagram/{post_id}/promote",
+            headers={"Authorization": f"Bearer {token}"},
+            json={"asNews": True, "asStory": True},
+            timeout=10
+        )
         
-        # Verify sorted by date ascending
-        if len(events) >= 2:
-            dates = [e.get('date') for e in events]
-            is_sorted = dates == sorted(dates)
-            test_result("Events sorted by date ascending", is_sorted, 
-                       f"First: {dates[0]}, Last: {dates[-1]}")
-    
-except Exception as e:
-    test_result("GET /api/events", False, f"Exception: {str(e)}")
+        if response.status_code == 200:
+            data = response.json()
+            if "storyId" in data and "newsId" in data:
+                created_resources["stories"].append(data["storyId"])
+                created_resources["news"].append(data["newsId"])
+                log_test("POST /admin/instagram/:id/promote", True, 
+                        f"Created story {data['storyId']} and news {data['newsId']}")
+                return data
+            else:
+                log_test("POST /admin/instagram/:id/promote", False, 
+                        f"Missing storyId or newsId in response: {data}")
+                return None
+        else:
+            log_test("POST /admin/instagram/:id/promote", False, 
+                    f"Status {response.status_code}: {response.text}")
+            return None
+    except Exception as e:
+        log_test("POST /admin/instagram/:id/promote", False, f"Exception: {str(e)}")
+        return None
 
-print("\n" + "=" * 80)
-print("TEST 6: Regression - Wrestlers API")
-print("=" * 80)
-
-try:
-    url = f"{API_BASE}/wrestlers"
-    response = requests.get(url, timeout=10)
-    
-    status_ok = response.status_code == 200
-    test_result("GET /api/wrestlers returns 200", status_ok, f"Status: {response.status_code}")
-    
-    if status_ok:
-        wrestlers = response.json()
+def test_get_public_stories(expected_story_id: str):
+    """Test GET /api/stories (public endpoint)"""
+    try:
+        response = requests.get(f"{BASE_URL}/stories", timeout=10)
         
-        # Check count
-        has_8_wrestlers = len(wrestlers) == 8
-        test_result("Returns 8 wrestlers", has_8_wrestlers, f"Count: {len(wrestlers)}")
+        if response.status_code == 200:
+            data = response.json()
+            if isinstance(data, list):
+                # Find our story
+                story = next((s for s in data if s.get("id") == expected_story_id), None)
+                if story:
+                    # Verify required fields
+                    required_fields = ["id", "title", "image", "caption"]
+                    missing = [f for f in required_fields if f not in story]
+                    if not missing:
+                        log_test("GET /stories includes promoted story", True, 
+                                f"Story {expected_story_id} has all required fields: {required_fields}")
+                        return True
+                    else:
+                        log_test("GET /stories includes promoted story", False, 
+                                f"Story missing fields: {missing}")
+                        return False
+                else:
+                    log_test("GET /stories includes promoted story", False, 
+                            f"Story {expected_story_id} not found in {len(data)} stories")
+                    return False
+            else:
+                log_test("GET /stories includes promoted story", False, "Response is not an array")
+                return False
+        else:
+            log_test("GET /stories includes promoted story", False, f"Status {response.status_code}")
+            return False
+    except Exception as e:
+        log_test("GET /stories includes promoted story", False, f"Exception: {str(e)}")
+        return False
+
+def test_get_public_news(expected_news_id: str):
+    """Test GET /api/news for promoted Instagram post"""
+    try:
+        response = requests.get(f"{BASE_URL}/news", timeout=10)
         
-        # Check all are category 'men'
-        if len(wrestlers) > 0:
-            all_men = all(w.get('category') == 'men' for w in wrestlers)
-            test_result("All wrestlers category 'men'", all_men, 
-                       f"Categories: {set(w.get('category') for w in wrestlers)}")
-            
-            # Check all champion false
-            all_not_champion = all(w.get('champion') == False for w in wrestlers)
-            test_result("All wrestlers champion=false", all_not_champion, 
-                       f"Champions: {[w.get('champion') for w in wrestlers]}")
-    
-except Exception as e:
-    test_result("GET /api/wrestlers", False, f"Exception: {str(e)}")
+        if response.status_code == 200:
+            data = response.json()
+            if isinstance(data, list):
+                # Find our news article
+                article = next((n for n in data if n.get("id") == expected_news_id), None)
+                if article:
+                    # Verify category is 'Instagram'
+                    if article.get("category") == "Instagram":
+                        log_test("GET /news includes promoted article with category 'Instagram'", True, 
+                                f"Article {expected_news_id} found with correct category")
+                        return True
+                    else:
+                        log_test("GET /news includes promoted article with category 'Instagram'", False, 
+                                f"Article category is '{article.get('category')}', expected 'Instagram'")
+                        return False
+                else:
+                    log_test("GET /news includes promoted article with category 'Instagram'", False, 
+                            f"Article {expected_news_id} not found in {len(data)} articles")
+                    return False
+            else:
+                log_test("GET /news includes promoted article with category 'Instagram'", False, 
+                        "Response is not an array")
+                return False
+        else:
+            log_test("GET /news includes promoted article with category 'Instagram'", False, 
+                    f"Status {response.status_code}")
+            return False
+    except Exception as e:
+        log_test("GET /news includes promoted article with category 'Instagram'", False, f"Exception: {str(e)}")
+        return False
 
-print("\n" + "=" * 80)
-print("TEST 7: Regression - News API")
-print("=" * 80)
-
-try:
-    url = f"{API_BASE}/news"
-    response = requests.get(url, timeout=10)
-    
-    status_ok = response.status_code == 200
-    test_result("GET /api/news returns 200", status_ok, f"Status: {response.status_code}")
-    
-    if status_ok:
-        news = response.json()
+def test_delete_instagram_post_without_token(post_id: str):
+    """Test DELETE /api/admin/instagram/:id without token"""
+    try:
+        response = requests.delete(
+            f"{BASE_URL}/admin/instagram/{post_id}",
+            timeout=10
+        )
         
-        # Check count
-        has_1_article = len(news) == 1
-        test_result("Returns exactly 1 article", has_1_article, f"Count: {len(news)}")
+        if response.status_code == 401:
+            log_test("DELETE /admin/instagram/:id without token returns 401", True, "Correctly rejected")
+            return True
+        else:
+            log_test("DELETE /admin/instagram/:id without token returns 401", False, 
+                    f"Expected 401, got {response.status_code}")
+            return False
+    except Exception as e:
+        log_test("DELETE /admin/instagram/:id without token returns 401", False, f"Exception: {str(e)}")
+        return False
+
+def test_delete_instagram_post(token: str, post_id: str):
+    """Test DELETE /api/admin/instagram/:id with token"""
+    try:
+        response = requests.delete(
+            f"{BASE_URL}/admin/instagram/{post_id}",
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=10
+        )
         
-        # Check it's the inaugural announcement
-        if len(news) > 0:
-            is_inaugural = news[0].get('id') == 'inaugural-announcement'
-            test_result("Article is 'inaugural-announcement'", is_inaugural, 
-                       f"ID: {news[0].get('id')}")
+        if response.status_code == 200:
+            # Verify it's no longer in the list
+            list_response = requests.get(f"{BASE_URL}/instagram", timeout=10)
+            if list_response.status_code == 200:
+                posts = list_response.json()
+                found = any(p.get("id") == post_id for p in posts)
+                if not found:
+                    log_test("DELETE /admin/instagram/:id removes post", True, 
+                            f"Post {post_id} successfully deleted")
+                    return True
+                else:
+                    log_test("DELETE /admin/instagram/:id removes post", False, 
+                            f"Post {post_id} still exists after deletion")
+                    return False
+            else:
+                log_test("DELETE /admin/instagram/:id removes post", False, 
+                        "Could not verify deletion")
+                return False
+        else:
+            log_test("DELETE /admin/instagram/:id removes post", False, 
+                    f"Status {response.status_code}: {response.text}")
+            return False
+    except Exception as e:
+        log_test("DELETE /admin/instagram/:id removes post", False, f"Exception: {str(e)}")
+        return False
+
+def test_delete_story(token: str, story_id: str):
+    """Test DELETE /api/admin/stories/:id"""
+    try:
+        response = requests.delete(
+            f"{BASE_URL}/admin/stories/{story_id}",
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=10
+        )
+        
+        if response.status_code == 200:
+            log_test("DELETE /admin/stories/:id", True, f"Story {story_id} deleted")
+            return True
+        else:
+            log_test("DELETE /admin/stories/:id", False, 
+                    f"Status {response.status_code}: {response.text}")
+            return False
+    except Exception as e:
+        log_test("DELETE /admin/stories/:id", False, f"Exception: {str(e)}")
+        return False
+
+def test_delete_news(token: str, news_id: str):
+    """Test DELETE /api/admin/news/:id"""
+    try:
+        response = requests.delete(
+            f"{BASE_URL}/admin/news/{news_id}",
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=10
+        )
+        
+        if response.status_code == 200:
+            log_test("DELETE /admin/news/:id", True, f"News {news_id} deleted")
+            return True
+        else:
+            log_test("DELETE /admin/news/:id", False, 
+                    f"Status {response.status_code}: {response.text}")
+            return False
+    except Exception as e:
+        log_test("DELETE /admin/news/:id", False, f"Exception: {str(e)}")
+        return False
+
+def test_regression_events():
+    """Regression test: GET /api/events should return 6 events"""
+    try:
+        response = requests.get(f"{BASE_URL}/events", timeout=10)
+        
+        if response.status_code == 200:
+            data = response.json()
+            if isinstance(data, list) and len(data) == 6:
+                log_test("Regression: GET /events returns 6 events", True, 
+                        f"Found {len(data)} events")
+                return True
+            else:
+                log_test("Regression: GET /events returns 6 events", False, 
+                        f"Expected 6 events, got {len(data) if isinstance(data, list) else 'non-array'}")
+                return False
+        else:
+            log_test("Regression: GET /events returns 6 events", False, f"Status {response.status_code}")
+            return False
+    except Exception as e:
+        log_test("Regression: GET /events returns 6 events", False, f"Exception: {str(e)}")
+        return False
+
+def test_regression_wrestlers():
+    """Regression test: GET /api/wrestlers should return 8 wrestlers"""
+    try:
+        response = requests.get(f"{BASE_URL}/wrestlers", timeout=10)
+        
+        if response.status_code == 200:
+            data = response.json()
+            if isinstance(data, list) and len(data) == 8:
+                log_test("Regression: GET /wrestlers returns 8 wrestlers", True, 
+                        f"Found {len(data)} wrestlers")
+                return True
+            else:
+                log_test("Regression: GET /wrestlers returns 8 wrestlers", False, 
+                        f"Expected 8 wrestlers, got {len(data) if isinstance(data, list) else 'non-array'}")
+                return False
+        else:
+            log_test("Regression: GET /wrestlers returns 8 wrestlers", False, f"Status {response.status_code}")
+            return False
+    except Exception as e:
+        log_test("Regression: GET /wrestlers returns 8 wrestlers", False, f"Exception: {str(e)}")
+        return False
+
+def test_regression_news():
+    """Regression test: GET /api/news should return exactly 1 article after cleanup"""
+    try:
+        response = requests.get(f"{BASE_URL}/news", timeout=10)
+        
+        if response.status_code == 200:
+            data = response.json()
+            if isinstance(data, list):
+                # Should have exactly 1 article (the inaugural announcement)
+                if len(data) == 1:
+                    article = data[0]
+                    if article.get("category") == "Announcements":
+                        log_test("Regression: GET /news returns 1 'Announcements' article", True, 
+                                f"Found inaugural article: {article.get('title', 'N/A')}")
+                        return True
+                    else:
+                        log_test("Regression: GET /news returns 1 'Announcements' article", False, 
+                                f"Article category is '{article.get('category')}', expected 'Announcements'")
+                        return False
+                else:
+                    log_test("Regression: GET /news returns 1 'Announcements' article", False, 
+                            f"Expected 1 article, got {len(data)}")
+                    return False
+            else:
+                log_test("Regression: GET /news returns 1 'Announcements' article", False, 
+                        "Response is not an array")
+                return False
+        else:
+            log_test("Regression: GET /news returns 1 'Announcements' article", False, 
+                    f"Status {response.status_code}")
+            return False
+    except Exception as e:
+        log_test("Regression: GET /news returns 1 'Announcements' article", False, f"Exception: {str(e)}")
+        return False
+
+def test_regression_instagram_empty():
+    """Regression test: GET /api/instagram should return 0 posts after cleanup"""
+    try:
+        response = requests.get(f"{BASE_URL}/instagram", timeout=10)
+        
+        if response.status_code == 200:
+            data = response.json()
+            if isinstance(data, list) and len(data) == 0:
+                log_test("Regression: GET /instagram returns 0 posts", True, "Instagram posts cleaned up")
+                return True
+            else:
+                log_test("Regression: GET /instagram returns 0 posts", False, 
+                        f"Expected 0 posts, got {len(data) if isinstance(data, list) else 'non-array'}")
+                return False
+        else:
+            log_test("Regression: GET /instagram returns 0 posts", False, f"Status {response.status_code}")
+            return False
+    except Exception as e:
+        log_test("Regression: GET /instagram returns 0 posts", False, f"Exception: {str(e)}")
+        return False
+
+def test_regression_stories_empty():
+    """Regression test: GET /api/stories should return 0 stories after cleanup"""
+    try:
+        response = requests.get(f"{BASE_URL}/stories", timeout=10)
+        
+        if response.status_code == 200:
+            data = response.json()
+            if isinstance(data, list) and len(data) == 0:
+                log_test("Regression: GET /stories returns 0 stories", True, "Stories cleaned up")
+                return True
+            else:
+                log_test("Regression: GET /stories returns 0 stories", False, 
+                        f"Expected 0 stories, got {len(data) if isinstance(data, list) else 'non-array'}")
+                return False
+        else:
+            log_test("Regression: GET /stories returns 0 stories", False, f"Status {response.status_code}")
+            return False
+    except Exception as e:
+        log_test("Regression: GET /stories returns 0 stories", False, f"Exception: {str(e)}")
+        return False
+
+def main():
+    """Run all tests"""
+    print("=" * 80)
+    print("BLACK AMETHYST WRESTLING - ADMIN CONTENT MANAGER API TESTS")
+    print("=" * 80)
+    print()
     
-except Exception as e:
-    test_result("GET /api/news", False, f"Exception: {str(e)}")
+    # 1. Auth tests
+    print("--- AUTH TESTS ---")
+    token = test_admin_login_correct_password()
+    if not token:
+        print("\n❌ CRITICAL: Could not obtain admin token. Aborting tests.")
+        sys.exit(1)
+    
+    test_admin_login_wrong_password()
+    test_admin_me_with_token(token)
+    test_admin_me_without_token()
+    test_admin_me_with_invalid_token()
+    print()
+    
+    # 2. Instagram posts tests
+    print("--- INSTAGRAM POSTS TESTS ---")
+    test_create_instagram_post_without_token()
+    
+    post_data = test_create_instagram_post_with_token(token)
+    if not post_data:
+        print("\n❌ CRITICAL: Could not create Instagram post. Aborting remaining tests.")
+        sys.exit(1)
+    
+    post_id = post_data["id"]
+    image_path = post_data["image"]
+    
+    test_get_instagram_post_image(image_path)
+    test_create_instagram_post_without_image(token)
+    test_get_public_instagram_posts(post_id)
+    print()
+    
+    # 3. Promote tests
+    print("--- PROMOTE TESTS ---")
+    promote_data = test_promote_instagram_post(token, post_id)
+    if not promote_data:
+        print("\n❌ CRITICAL: Could not promote Instagram post. Aborting remaining tests.")
+        sys.exit(1)
+    
+    story_id = promote_data["storyId"]
+    news_id = promote_data["newsId"]
+    
+    test_get_public_stories(story_id)
+    test_get_public_news(news_id)
+    print()
+    
+    # 4. Delete tests (without token first)
+    print("--- DELETE TESTS ---")
+    test_delete_instagram_post_without_token(post_id)
+    print()
+    
+    # 5. Cleanup - delete all created resources
+    print("--- CLEANUP ---")
+    test_delete_instagram_post(token, post_id)
+    test_delete_story(token, story_id)
+    test_delete_news(token, news_id)
+    print()
+    
+    # 6. Regression tests
+    print("--- REGRESSION TESTS ---")
+    test_regression_events()
+    test_regression_wrestlers()
+    test_regression_news()
+    test_regression_instagram_empty()
+    test_regression_stories_empty()
+    print()
+    
+    # Summary
+    print("=" * 80)
+    print("TEST SUMMARY")
+    print("=" * 80)
+    total = len(test_results)
+    passed = sum(1 for t in test_results if t["passed"])
+    failed = total - passed
+    
+    print(f"Total tests: {total}")
+    print(f"Passed: {passed} ✅")
+    print(f"Failed: {failed} ❌")
+    print(f"Success rate: {(passed/total*100):.1f}%")
+    print()
+    
+    if failed > 0:
+        print("Failed tests:")
+        for t in test_results:
+            if not t["passed"]:
+                print(f"  ❌ {t['name']}")
+                if t["details"]:
+                    print(f"     {t['details']}")
+        print()
+    
+    # Exit with appropriate code
+    sys.exit(0 if failed == 0 else 1)
 
-print("\n" + "=" * 80)
-print("SUMMARY")
-print("=" * 80)
-
-print(f"\nTotal Tests: {tests_passed + tests_failed}")
-print(f"✅ Passed: {tests_passed}")
-print(f"❌ Failed: {tests_failed}")
-
-# Asset delivery summary
-asset_passed = sum(1 for _, passed in asset_test_results if passed)
-asset_failed = len(asset_test_results) - asset_passed
-print(f"\nAsset Delivery: {asset_passed}/{len(required_assets)} files working")
-
-if tests_failed > 0:
-    print("\n⚠️ SOME TESTS FAILED")
-    print("\nFailed tests:")
-    for test_name, passed, message in test_results:
-        if not passed:
-            print(f"  - {test_name}: {message}")
-    sys.exit(1)
-else:
-    print("\n✅ ALL TESTS PASSED")
-    sys.exit(0)
+if __name__ == "__main__":
+    main()

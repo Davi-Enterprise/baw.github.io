@@ -296,6 +296,28 @@ function clean(arr) {
   return arr.map(({ _id, ...rest }) => rest)
 }
 
+// ---------- Admin auth ----------
+async function getSession(request, db) {
+  try {
+    const auth = request.headers.get('authorization') || ''
+    const token = auth.replace(/^Bearer\s+/i, '').trim()
+    if (!token) return null
+    return await db.collection('sessions').findOne({ token })
+  } catch { return null }
+}
+
+async function storeImageAsset(db, id, imageBase64, contentType) {
+  const ct = contentType || 'image/jpeg'
+  const ext = (ct.split('/')[1] || 'jpg').replace('jpeg', 'jpg')
+  const filename = `ig-${id}.${ext}`
+  await db.collection('assets').updateOne(
+    { filename },
+    { $set: { filename, contentType: ct, data: imageBase64 } },
+    { upsert: true }
+  )
+  return `/api/asset/${filename}`
+}
+
 async function handleRoute(request, { params }) {
   const { path = [] } = await params
   const route = `/${path.join('/')}`
@@ -389,6 +411,127 @@ async function handleRoute(request, { params }) {
       const news = await db.collection('news').find({}).toArray()
       news.sort((a, b) => new Date(b.date) - new Date(a.date))
       return handleCORS(NextResponse.json(clean(news)))
+    }
+
+    // ---------- Instagram grid (public) ----------
+    if (route === '/instagram' && method === 'GET') {
+      const posts = await db.collection('igposts').find({}).toArray()
+      posts.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
+      return handleCORS(NextResponse.json(clean(posts)))
+    }
+
+    // ---------- Stories (public) ----------
+    if (route === '/stories' && method === 'GET') {
+      const stories = await db.collection('stories').find({}).toArray()
+      stories.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
+      return handleCORS(NextResponse.json(clean(stories)))
+    }
+
+    // ---------- Admin: login ----------
+    if (route === '/admin/login' && method === 'POST') {
+      const body = await request.json()
+      if (!process.env.ADMIN_PASSWORD) {
+        return handleCORS(NextResponse.json({ error: 'Admin not configured' }, { status: 500 }))
+      }
+      if (!body.password || body.password !== process.env.ADMIN_PASSWORD) {
+        return handleCORS(NextResponse.json({ error: 'Incorrect password' }, { status: 401 }))
+      }
+      const token = uuidv4() + '-' + uuidv4()
+      await db.collection('sessions').insertOne({ token, createdAt: new Date() })
+      return handleCORS(NextResponse.json({ token }))
+    }
+
+    // ---------- Admin: verify session ----------
+    if (route === '/admin/me' && method === 'GET') {
+      const s = await getSession(request, db)
+      return handleCORS(NextResponse.json({ authenticated: !!s }))
+    }
+
+    // ---------- Admin: logout ----------
+    if (route === '/admin/logout' && method === 'POST') {
+      const auth = request.headers.get('authorization') || ''
+      const token = auth.replace(/^Bearer\s+/i, '').trim()
+      if (token) await db.collection('sessions').deleteOne({ token })
+      return handleCORS(NextResponse.json({ ok: true }))
+    }
+
+    // All /admin/* routes below require a valid session
+    if (path[0] === 'admin') {
+      const session = await getSession(request, db)
+      if (!session) return handleCORS(NextResponse.json({ error: 'Unauthorized' }, { status: 401 }))
+
+      // Create Instagram post
+      if (route === '/admin/instagram' && method === 'POST') {
+        const body = await request.json()
+        const id = uuidv4()
+        let image = ''
+        if (body.imageBase64) {
+          image = await storeImageAsset(db, id, body.imageBase64, body.contentType)
+        } else if (body.imageUrl) {
+          image = body.imageUrl
+        }
+        if (!image) return handleCORS(NextResponse.json({ error: 'An image is required' }, { status: 400 }))
+        const doc = { id, link: body.link || '', caption: body.caption || '', image, createdAt: new Date() }
+        await db.collection('igposts').insertOne(doc)
+        const { _id, ...rest } = doc
+        return handleCORS(NextResponse.json(rest))
+      }
+
+      // Promote an Instagram post -> News article and/or Story
+      if (path[1] === 'instagram' && path[3] === 'promote' && method === 'POST') {
+        const igId = path[2]
+        const post = await db.collection('igposts').findOne({ id: igId })
+        if (!post) return handleCORS(NextResponse.json({ error: 'Post not found' }, { status: 404 }))
+        const body = await request.json().catch(() => ({}))
+        const asNews = body.asNews !== false
+        const asStory = body.asStory !== false
+        const result = {}
+        const caption = post.caption || ''
+        const firstLine = (caption.split('\n')[0] || 'From Instagram').slice(0, 90)
+        if (asStory) {
+          const sid = uuidv4()
+          await db.collection('stories').insertOne({ id: sid, title: firstLine, image: post.image, caption, link: post.link || '', createdAt: new Date() })
+          result.storyId = sid
+        }
+        if (asNews) {
+          const nid = uuidv4()
+          await db.collection('news').insertOne({
+            id: nid, category: 'Instagram', title: firstLine,
+            excerpt: caption.slice(0, 200), content: caption,
+            date: new Date().toISOString(), image: post.image, author: 'Black Amethyst Wrestling',
+            link: post.link || '',
+          })
+          result.newsId = nid
+        }
+        await db.collection('igposts').updateOne({ id: igId }, { $set: { promoted: true } })
+        return handleCORS(NextResponse.json({ ok: true, ...result }))
+      }
+
+      // Delete Instagram post
+      if (path[1] === 'instagram' && path[2] && !path[3] && method === 'DELETE') {
+        const igId = path[2]
+        const post = await db.collection('igposts').findOne({ id: igId })
+        await db.collection('igposts').deleteOne({ id: igId })
+        if (post?.image?.startsWith('/api/asset/')) {
+          const fn = post.image.replace('/api/asset/', '')
+          if (fn.startsWith('ig-')) await db.collection('assets').deleteOne({ filename: fn })
+        }
+        return handleCORS(NextResponse.json({ ok: true }))
+      }
+
+      // Delete Story
+      if (path[1] === 'stories' && path[2] && method === 'DELETE') {
+        await db.collection('stories').deleteOne({ id: path[2] })
+        return handleCORS(NextResponse.json({ ok: true }))
+      }
+
+      // Delete News article
+      if (path[1] === 'news' && path[2] && method === 'DELETE') {
+        await db.collection('news').deleteOne({ id: path[2] })
+        return handleCORS(NextResponse.json({ ok: true }))
+      }
+
+      return handleCORS(NextResponse.json({ error: `Admin route ${route} not found` }, { status: 404 }))
     }
 
     // Newsletter signup

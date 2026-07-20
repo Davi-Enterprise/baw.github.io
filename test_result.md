@@ -197,8 +197,7 @@ backend:
         -working: true
         -agent: "testing"
         -comment: "✅ TESTED: POST /api/paypal/capture-order with missing orderID correctly returns 400 with error 'orderID required'. POST with fake/unapproved orderID 'FAKEORDER123' correctly returns 502 with error (no server crash). This is expected behavior as full successful capture requires buyer approval in PayPal UI which cannot be automated in testing."
-  - task: "Image path self-heal migration (migrateImagePaths)"
-    implemented: true
+  - task: "Image path self-heal migration (migrateImagePaths)"    implemented: true
     working: true
     file: "/app/app/api/[[...path]]/route.js"
     stuck_count: 0
@@ -224,6 +223,21 @@ backend:
         -agent: "testing"
         -comment: "✅ ASSET DELIVERY ROUTE TESTS PASSED (28/28 - 100%). All 11 required asset files return HTTP 200 with correct image/* Content-Type and body size >1KB: logo-t.png (image/png, 241KB), tj-slater.png (image/jpeg, 166KB), arik-walker.png (image/jpeg, 164KB), dangelo-leflame.png (image/jpeg, 166KB), alex-rey.png (image/jpeg, 168KB), draco.png (image/jpeg, 170KB), inaugural-poster.png (image/jpeg, 139KB), big-haus.jpeg (image/jpeg, 162KB), schedule-poster.jpeg (image/jpeg, 152KB), james-derek.webp (image/jpeg, 156KB), rakzo-moreno.webp (image/jpeg, 157KB). Non-existent asset (does-not-exist.png) correctly returns 404. Path traversal safety verified: GET /api/asset/../package.json returns 404 (safe). MongoDB assets collection seeding verified: 11 documents with required fields (filename, contentType, data). REGRESSION TESTS PASSED: Events API returns 6 events sorted ascending with inaugural-show first (status: on-sale). Wrestlers API returns 8 wrestlers (all category 'men', champion false). News API returns exactly 1 article (inaugural-announcement). Asset delivery route is production-ready and deployment-proof."
 
+  - task: "Admin panel API: auth + Instagram posts + Stories + promote"
+    implemented: true
+    working: true
+    file: "/app/app/api/[[...path]]/route.js"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        -working: "NA"
+        -agent: "main"
+        -comment: "NEW FEATURE. Password-protected admin content manager. Endpoints: POST /api/admin/login {password} -> {token} (ADMIN_PASSWORD env = 'BAW-Amethyst-2026'); wrong password -> 401. GET /api/admin/me (Bearer token) -> {authenticated}. POST /api/admin/logout. POST /api/admin/instagram (auth) {link,caption,imageBase64,contentType} stores image into 'assets' collection as ig-<uuid>.<ext>, creates igpost with image=/api/asset/<filename>; missing image -> 400; no/invalid token -> 401. GET /api/instagram (public). POST /api/admin/instagram/:id/promote {asNews,asStory} -> creates Story (stories coll) and/or News article (news coll, category 'Instagram'). GET /api/stories (public). DELETE /api/admin/instagram/:id (also deletes ig- asset). DELETE /api/admin/stories/:id. DELETE /api/admin/news/:id. Verified manually via node end-to-end. Needs formal testing. Credentials in /app/memory/test_credentials.md."
+        -working: true
+        -agent: "testing"
+        -comment: "✅ COMPREHENSIVE ADMIN CONTENT MANAGER API TESTS PASSED (22/22 - 100%). AUTH: Login with correct password returns token, wrong password returns 401, GET /admin/me with valid token returns authenticated:true, without/invalid token returns authenticated:false. INSTAGRAM POSTS: POST /admin/instagram without token returns 401, with token and image creates post with ig-<uuid> asset path (/api/asset/ig-...), GET on image path returns 200 with image/* content-type, POST without image returns 400, GET /instagram (public) includes created post. PROMOTE: POST /admin/instagram/:id/promote creates both storyId and newsId, GET /stories includes promoted story with all required fields (id, title, image, caption), GET /news includes promoted article with category 'Instagram'. DELETE: DELETE /admin/instagram/:id without token returns 401, with token removes post from list, DELETE /admin/stories/:id removes story, DELETE /admin/news/:id removes news article. CLEANUP: All test data successfully deleted. REGRESSION: GET /events returns 6 events, GET /wrestlers returns 8 wrestlers, GET /news returns 1 'Announcements' article (inaugural), GET /instagram returns 0 posts, GET /stories returns 0 stories. Admin content manager is production-ready."
+
 frontend:
   - task: "Cinematic multi-page SPA (Home, Events, Tickets, Roster, Media, News, About, Contact + details)"
     implemented: true
@@ -247,8 +261,7 @@ metadata:
   run_ui: false
 
 test_plan:
-  current_focus:
-    - "Image path self-heal migration (migrateImagePaths)"
+  current_focus: []
   stuck_tasks: []
   test_all: false
   test_priority: "high_first"
@@ -266,3 +279,5 @@ agent_communication:
     -message: "Please test the reworked ASSET DELIVERY route which fixes broken production images. Focus: (1) GET /api/asset/<file> for each of these 11 filenames must return HTTP 200 with an image/* Content-Type and a non-empty body: logo-t.png, tj-slater.png, arik-walker.png, dangelo-leflame.png, alex-rey.png, big-haus.jpeg, draco.png, james-derek.webp, rakzo-moreno.webp, inaugural-poster.png, schedule-poster.jpeg. (2) GET /api/asset/does-not-exist.png returns 404. (3) A path-traversal attempt like /api/asset/../package.json must NOT return package.json (should be sanitized/404). (4) Verify the MongoDB 'assets' collection has 11 docs after any /api/events call (seeding). (5) Regression: GET /api/events (6 events, inaugural-show first), GET /api/wrestlers (8 wrestlers), GET /api/news (1 inaugural article). Do not run PayPal live captures. Base URL uses NEXT_PUBLIC_BASE_URL with /api prefix."
     -agent: "testing"
     -message: "✅ ASSET DELIVERY ROUTE COMPREHENSIVE TESTING COMPLETE (28/28 tests passed - 100%). All requirements verified: (1) All 11 asset files return HTTP 200 with correct image/* Content-Type and body >1KB. Sizes range from 139KB to 241KB. All wrestler images (tj-slater, arik-walker, dangelo-leflame, alex-rey, big-haus, draco, james-derek, rakzo-moreno) and posters (logo-t, inaugural-poster, schedule-poster) serving correctly. (2) Non-existent asset returns 404 as expected. (3) Path traversal safety confirmed: ../package.json returns 404 (sanitized). (4) MongoDB seeding verified: assets collection contains exactly 11 documents with required fields (filename, contentType, data). (5) All regression tests passed: Events API returns 6 events sorted ascending with inaugural-show first (status: on-sale), Wrestlers API returns 8 wrestlers (all category 'men', champion false), News API returns 1 article (inaugural-announcement). The reworked asset delivery route using bundled base64 module (asset-data.json) is production-ready and deployment-proof. No issues found."
+    -agent: "testing"
+    -message: "✅ ADMIN CONTENT MANAGER API COMPREHENSIVE TESTING COMPLETE (22/22 tests passed - 100%). Tested all admin endpoints with password 'BAW-Amethyst-2026'. AUTH (5/5): Login with correct password returns token, wrong password returns 401, GET /admin/me with valid token returns authenticated:true, without/invalid token returns authenticated:false. INSTAGRAM POSTS (5/5): POST /admin/instagram without token returns 401, with token and base64 image creates post with ig-<uuid> asset path, GET on image path returns 200 with image/png content-type (70 bytes), POST without image returns 400, GET /instagram (public) includes created post. PROMOTE (3/3): POST /admin/instagram/:id/promote with {asNews:true, asStory:true} creates both storyId and newsId, GET /stories includes promoted story with all required fields (id, title, image, caption), GET /news includes promoted article with category 'Instagram'. DELETE (4/4): DELETE /admin/instagram/:id without token returns 401, with token removes post from list and deletes ig- asset, DELETE /admin/stories/:id removes story, DELETE /admin/news/:id removes news article. CLEANUP: All test data successfully deleted (0 instagram posts, 0 stories). REGRESSION (5/5): GET /events returns 6 events, GET /wrestlers returns 8 wrestlers, GET /news returns exactly 1 'Announcements' article (inaugural), GET /instagram returns 0 posts, GET /stories returns 0 stories. Admin content manager is production-ready. No issues found."

@@ -6,7 +6,7 @@ import {
   Menu, X, ArrowRight, ChevronRight, ChevronLeft, MapPin, Calendar, Clock,
   Ticket, Play, Instagram, Youtube, Twitter, Facebook, Search, ArrowUp,
   Trophy, Users, Zap, Mail, Phone, Send, ChevronDown, Check, Star, Share2, Flame,
-  ShoppingCart, Plus, Minus, Trash2,
+  ShoppingCart, Plus, Minus, Trash2, Upload, LogOut, Lock, Loader2, Sparkles,
 } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
@@ -385,10 +385,14 @@ const PageBanner = ({ title, overline, img }) => (
 const HomePage = ({ nav, data, onOpenEvent, onOpenWrestler, onTickets }) => {
   const next = data.events.find((e) => e.status !== 'coming-soon') || data.events[0]
   const scroller = useRef(null)
+  const [storyIdx, setStoryIdx] = useState(null)
   const scrollBy = (dir) => scroller.current?.scrollBy({ left: dir * 360, behavior: 'smooth' })
   return (
     <div>
       <Hero nav={nav} nextEvent={next} />
+
+      <StoriesBar stories={data.stories} onOpen={setStoryIdx} />
+      <StoryViewer stories={data.stories || []} index={storyIdx} onClose={() => setStoryIdx(null)} onIndex={setStoryIdx} />
 
       {/* ABOUT / MISSION */}
       <section className="relative py-28 overflow-hidden">
@@ -523,14 +527,26 @@ const HomePage = ({ nav, data, onOpenEvent, onOpenWrestler, onTickets }) => {
             <div>
               <SectionHeading overline="@blackamethystwrestling" title="ON INSTAGRAM" />
               <div className="grid grid-cols-3 gap-3">
-                {[HERO_SLIDES[0].img, data.wrestlers[0]?.image, HERO_SLIDES[2].img, data.wrestlers[2]?.image, HERO_SLIDES[1].img, data.wrestlers[4]?.image].map((img, i) => (
-                  <div key={i} className="group relative aspect-square rounded-lg overflow-hidden cursor-pointer">
-                    <img src={img} alt="" className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110" />
-                    <div className="absolute inset-0 bg-[#6A0DAD]/0 group-hover:bg-[#6A0DAD]/50 transition-colors flex items-center justify-center">
-                      <Instagram size={26} className="text-white opacity-0 group-hover:opacity-100 transition-opacity" />
-                    </div>
-                  </div>
-                ))}
+                {(() => {
+                  const real = (data.instagram || []).slice(0, 6)
+                  const fallback = [HERO_SLIDES[0].img, data.wrestlers[0]?.image, HERO_SLIDES[2].img, data.wrestlers[2]?.image, HERO_SLIDES[1].img, data.wrestlers[4]?.image].map((img) => ({ image: img, link: '' }))
+                  const tiles = real.length ? real : fallback
+                  return tiles.map((post, i) => {
+                    const inner = (
+                      <>
+                        <img src={post.image} alt={post.caption || ''} className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110" />
+                        <div className="absolute inset-0 bg-[#6A0DAD]/0 group-hover:bg-[#6A0DAD]/50 transition-colors flex items-center justify-center">
+                          <Instagram size={26} className="text-white opacity-0 group-hover:opacity-100 transition-opacity" />
+                        </div>
+                      </>
+                    )
+                    return post.link ? (
+                      <a key={i} href={post.link} target="_blank" rel="noreferrer" className="group relative aspect-square rounded-lg overflow-hidden cursor-pointer">{inner}</a>
+                    ) : (
+                      <div key={i} className="group relative aspect-square rounded-lg overflow-hidden cursor-pointer">{inner}</div>
+                    )
+                  })
+                })()}
               </div>
             </div>
             <div>
@@ -1289,6 +1305,7 @@ const Footer = ({ nav }) => (
             <li><button onClick={() => nav('merch')} className="hover:text-[#B15EFF] transition-colors">Merch (Soon)</button></li>
             <li><button onClick={() => nav('privacy')} className="hover:text-[#B15EFF] transition-colors">Privacy Policy</button></li>
             <li><button onClick={() => nav('terms')} className="hover:text-[#B15EFF] transition-colors">Terms of Service</button></li>
+            <li><button onClick={() => nav('admin')} className="hover:text-[#B15EFF] transition-colors">Admin</button></li>
           </ul>
         </div>
         <div>
@@ -1463,30 +1480,332 @@ const CartDrawer = ({ ev }) => {
   )
 }
 
+/* ============================= STORIES ============================= */
+const fileToResizedBase64 = (file, maxDim = 1080, quality = 0.82) =>
+  new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onerror = reject
+    reader.onload = () => {
+      const img = new window.Image()
+      img.onerror = reject
+      img.onload = () => {
+        let { width, height } = img
+        if (Math.max(width, height) > maxDim) {
+          if (width > height) { height = Math.round((height * maxDim) / width); width = maxDim }
+          else { width = Math.round((width * maxDim) / height); height = maxDim }
+        }
+        const canvas = document.createElement('canvas')
+        canvas.width = width; canvas.height = height
+        canvas.getContext('2d').drawImage(img, 0, 0, width, height)
+        const dataUrl = canvas.toDataURL('image/jpeg', quality)
+        resolve({ base64: dataUrl.split(',')[1], contentType: 'image/jpeg', preview: dataUrl })
+      }
+      img.src = reader.result
+    }
+    reader.readAsDataURL(file)
+  })
+
+const StoriesBar = ({ stories, onOpen }) => {
+  if (!stories || stories.length === 0) return null
+  return (
+    <section className="border-b border-white/8 bg-[#0d0d0d]/60">
+      <div className="container mx-auto px-5 py-5">
+        <div className="flex gap-4 overflow-x-auto hide-scroll">
+          {stories.map((s, i) => (
+            <button key={s.id} onClick={() => onOpen(i)} className="flex flex-col items-center gap-2 shrink-0 group">
+              <div className="p-[3px] rounded-full bg-gradient-to-tr from-[#6A0DAD] via-[#B15EFF] to-[#8A2BE2] group-hover:scale-105 transition-transform">
+                <div className="p-[2px] rounded-full bg-[#0d0d0d]">
+                  <img src={s.image} alt={s.title || 'Story'} className="w-16 h-16 md:w-[70px] md:h-[70px] rounded-full object-cover" />
+                </div>
+              </div>
+              <span className="text-[10px] font-oswald uppercase tracking-widest text-[#BDBDBD] max-w-[74px] truncate">{s.title || 'Story'}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+    </section>
+  )
+}
+
+const StoryViewer = ({ stories, index, onClose, onIndex }) => {
+  const active = index != null && stories[index]
+  useEffect(() => {
+    if (index == null) return
+    const onKey = (e) => {
+      if (e.key === 'Escape') onClose()
+      if (e.key === 'ArrowRight') onIndex(Math.min(stories.length - 1, index + 1))
+      if (e.key === 'ArrowLeft') onIndex(Math.max(0, index - 1))
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [index, stories, onClose, onIndex])
+  return (
+    <AnimatePresence>
+      {active && (
+        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+          className="fixed inset-0 z-[95] bg-black/95 backdrop-blur-sm flex items-center justify-center">
+          <button onClick={onClose} className="absolute top-5 right-5 z-10 text-white/80 hover:text-white"><X size={30} /></button>
+          {/* progress bars */}
+          <div className="absolute top-4 left-1/2 -translate-x-1/2 flex gap-1.5 w-[min(420px,80vw)]">
+            {stories.map((_, i) => (
+              <div key={i} className="h-1 flex-1 rounded-full bg-white/25 overflow-hidden">
+                <div className={`h-full ${i <= index ? 'bg-[#B15EFF]' : ''}`} style={{ width: i <= index ? '100%' : 0 }} />
+              </div>
+            ))}
+          </div>
+          {index > 0 && (
+            <button onClick={() => onIndex(index - 1)} className="absolute left-3 md:left-8 z-10 w-11 h-11 rounded-full glass flex items-center justify-center text-white"><ChevronLeft size={22} /></button>
+          )}
+          <motion.div key={active.id} initial={{ scale: 0.96, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}
+            className="relative w-[min(440px,92vw)] max-h-[88vh] rounded-2xl overflow-hidden glow border border-white/10 bg-[#0d0d0d]">
+            <img src={active.image} alt={active.title || ''} className="w-full max-h-[70vh] object-contain bg-black" />
+            <div className="p-5">
+              <div className="flex items-center gap-2 mb-2">
+                <Instagram size={16} className="text-[#B15EFF]" />
+                <span className="font-oswald uppercase tracking-widest text-xs text-[#B15EFF]">@blackamethystwrestling</span>
+              </div>
+              {active.caption && <p className="text-sm text-[#E8E8E8] font-poppins font-300 whitespace-pre-line line-clamp-5">{active.caption}</p>}
+              {active.link && (
+                <a href={active.link} target="_blank" rel="noreferrer" className="mt-3 inline-flex items-center gap-1 text-[#B15EFF] font-oswald uppercase tracking-widest text-xs hover:underline">
+                  View on Instagram <ArrowRight size={14} />
+                </a>
+              )}
+            </div>
+          </motion.div>
+          {index < stories.length - 1 && (
+            <button onClick={() => onIndex(index + 1)} className="absolute right-3 md:right-8 z-10 w-11 h-11 rounded-full glass flex items-center justify-center text-white"><ChevronRight size={22} /></button>
+          )}
+        </motion.div>
+      )}
+    </AnimatePresence>
+  )
+}
+
+/* ============================= ADMIN ============================= */
+const TOKEN_KEY = 'baw_admin_token'
+const adminHeaders = (token, json = true) => ({ ...(json ? { 'Content-Type': 'application/json' } : {}), Authorization: `Bearer ${token}` })
+
+const AdminPage = ({ onDataChange }) => {
+  const [token, setToken] = useState(() => (typeof window !== 'undefined' ? (localStorage.getItem(TOKEN_KEY) || '') : ''))
+  const [pw, setPw] = useState('')
+  const [loginErr, setLoginErr] = useState('')
+  const [posts, setPosts] = useState([])
+  const [stories, setStories] = useState([])
+  const [caption, setCaption] = useState('')
+  const [link, setLink] = useState('')
+  const [imgData, setImgData] = useState(null)
+  const [busy, setBusy] = useState(false)
+  const [msg, setMsg] = useState('')
+  const fileRef = useRef(null)
+
+  const loadLists = async () => {
+    try {
+      const [p, s] = await Promise.all([
+        fetch('/api/instagram').then((r) => r.json()),
+        fetch('/api/stories').then((r) => r.json()),
+      ])
+      setPosts(Array.isArray(p) ? p : [])
+      setStories(Array.isArray(s) ? s : [])
+    } catch {}
+  }
+
+  useEffect(() => {
+    if (!token) return
+    fetch('/api/admin/me', { headers: adminHeaders(token, false) })
+      .then((r) => r.json())
+      .then((d) => { if (d.authenticated) { loadLists() } else { localStorage.removeItem(TOKEN_KEY); setToken('') } })
+      .catch(() => {})
+  }, [])
+
+  const login = async (e) => {
+    e.preventDefault()
+    setLoginErr('')
+    const r = await fetch('/api/admin/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: pw }) })
+    const d = await r.json()
+    if (d.token) { localStorage.setItem(TOKEN_KEY, d.token); setToken(d.token); setPw(''); loadLists() }
+    else setLoginErr(d.error || 'Login failed')
+  }
+
+  const logout = async () => {
+    try { await fetch('/api/admin/logout', { method: 'POST', headers: adminHeaders(token, false) }) } catch {}
+    localStorage.removeItem(TOKEN_KEY); setToken('')
+  }
+
+  const pickImage = async (e) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    try { const res = await fileToResizedBase64(file); setImgData(res) } catch { setMsg('Could not read image') }
+  }
+
+  const flash = (m) => { setMsg(m); setTimeout(() => setMsg(''), 3000) }
+
+  const addPost = async (e) => {
+    e.preventDefault()
+    if (!imgData) { flash('Please choose an image first.'); return }
+    setBusy(true)
+    try {
+      const r = await fetch('/api/admin/instagram', { method: 'POST', headers: adminHeaders(token), body: JSON.stringify({ link, caption, imageBase64: imgData.base64, contentType: imgData.contentType }) })
+      const d = await r.json()
+      if (r.ok) { setCaption(''); setLink(''); setImgData(null); if (fileRef.current) fileRef.current.value = ''; flash('Post added!'); await loadLists(); onDataChange?.() }
+      else flash(d.error || 'Failed to add post')
+    } finally { setBusy(false) }
+  }
+
+  const promote = async (id) => {
+    setBusy(true)
+    try {
+      await fetch(`/api/admin/instagram/${id}/promote`, { method: 'POST', headers: adminHeaders(token), body: JSON.stringify({ asNews: true, asStory: true }) })
+      flash('Turned into a Story + News article!'); await loadLists(); onDataChange?.()
+    } finally { setBusy(false) }
+  }
+
+  const delPost = async (id) => {
+    await fetch(`/api/admin/instagram/${id}`, { method: 'DELETE', headers: adminHeaders(token, false) })
+    await loadLists(); onDataChange?.()
+  }
+  const delStory = async (id) => {
+    await fetch(`/api/admin/stories/${id}`, { method: 'DELETE', headers: adminHeaders(token, false) })
+    await loadLists(); onDataChange?.()
+  }
+
+  if (!token) {
+    return (
+      <div className="min-h-screen flex items-center justify-center px-5 pt-24 pb-16 relative overflow-hidden">
+        <SmokeOverlay />
+        <form onSubmit={login} className="relative glass rounded-2xl p-8 w-full max-w-sm glow">
+          <div className="flex flex-col items-center mb-6">
+            <div className="w-14 h-14 rounded-full bg-gradient-to-br from-[#6A0DAD] to-[#8A2BE2] flex items-center justify-center glow mb-3"><Lock size={22} /></div>
+            <h1 className="font-bebas text-4xl">ADMIN LOGIN</h1>
+            <p className="text-[#BDBDBD] font-poppins text-sm mt-1">Black Amethyst Wrestling</p>
+          </div>
+          <label className="text-xs font-oswald uppercase tracking-widest text-[#BDBDBD]">Password</label>
+          <Input type="password" value={pw} onChange={(e) => setPw(e.target.value)} placeholder="Enter admin password"
+            className="bg-white/5 border-white/10 h-12 mt-1 text-white placeholder:text-[#BDBDBD]/60" />
+          {loginErr && <div className="text-red-400 text-sm font-poppins mt-2">{loginErr}</div>}
+          <GlowButton type="submit" full className="mt-5">Log In</GlowButton>
+        </form>
+      </div>
+    )
+  }
+
+  return (
+    <div className="min-h-screen pt-28 pb-20">
+      <div className="container mx-auto px-5">
+        <div className="flex items-center justify-between mb-10">
+          <div>
+            <div className="font-oswald uppercase tracking-[0.4em] text-xs text-[#B15EFF] mb-2">Content Manager</div>
+            <h1 className="font-bebas text-6xl leading-none">ADMIN DASHBOARD</h1>
+          </div>
+          <GlowButton variant="outline" onClick={logout}><LogOut size={16} /> Log Out</GlowButton>
+        </div>
+
+        {msg && <div className="mb-6 glass rounded-lg p-3 text-[#B15EFF] font-poppins text-sm inline-flex items-center gap-2"><Check size={16} /> {msg}</div>}
+
+        <div className="grid lg:grid-cols-2 gap-8">
+          {/* Add post */}
+          <div className="glass rounded-2xl p-6">
+            <h2 className="font-bebas text-3xl mb-4 flex items-center gap-2"><Instagram size={22} className="text-[#B15EFF]" /> ADD INSTAGRAM POST</h2>
+            <form onSubmit={addPost} className="space-y-4">
+              <div>
+                <label className="text-xs font-oswald uppercase tracking-widest text-[#BDBDBD]">Instagram Post Link (optional)</label>
+                <Input value={link} onChange={(e) => setLink(e.target.value)} placeholder="https://www.instagram.com/p/..." className="bg-white/5 border-white/10 h-11 mt-1 text-white placeholder:text-[#BDBDBD]/60" />
+              </div>
+              <div>
+                <label className="text-xs font-oswald uppercase tracking-widest text-[#BDBDBD]">Caption</label>
+                <Textarea value={caption} onChange={(e) => setCaption(e.target.value)} rows={4} placeholder="Write the caption / story text..." className="bg-white/5 border-white/10 mt-1 text-white placeholder:text-[#BDBDBD]/60" />
+              </div>
+              <div>
+                <label className="text-xs font-oswald uppercase tracking-widest text-[#BDBDBD]">Image</label>
+                <div onClick={() => fileRef.current?.click()} className="mt-1 border border-dashed border-white/20 rounded-xl p-4 flex items-center gap-4 cursor-pointer hover:border-[#8A2BE2] transition-colors">
+                  {imgData ? (
+                    <img src={imgData.preview} alt="preview" className="w-20 h-20 rounded-lg object-cover" />
+                  ) : (
+                    <div className="w-20 h-20 rounded-lg bg-white/5 flex items-center justify-center"><Upload size={22} className="text-[#BDBDBD]" /></div>
+                  )}
+                  <div className="text-sm text-[#BDBDBD] font-poppins">{imgData ? 'Image selected — tap to change' : 'Tap to upload the post image (screenshot or saved photo)'}</div>
+                </div>
+                <input ref={fileRef} type="file" accept="image/*" onChange={pickImage} className="hidden" />
+              </div>
+              <GlowButton type="submit" full className={busy ? 'opacity-70 pointer-events-none' : ''}>
+                {busy ? <Loader2 size={16} className="animate-spin" /> : <Plus size={16} />} Add to Instagram Grid
+              </GlowButton>
+            </form>
+          </div>
+
+          {/* Manage */}
+          <div className="space-y-8">
+            <div className="glass rounded-2xl p-6">
+              <h2 className="font-bebas text-3xl mb-4">POSTS ({posts.length})</h2>
+              {posts.length === 0 ? <p className="text-[#BDBDBD] font-poppins text-sm">No posts yet. Add one on the left.</p> : (
+                <div className="space-y-3 max-h-[360px] overflow-y-auto hide-scroll">
+                  {posts.map((p) => (
+                    <div key={p.id} className="flex items-center gap-3 glass rounded-xl p-3">
+                      <img src={p.image} alt="" className="w-14 h-14 rounded-lg object-cover shrink-0" />
+                      <div className="flex-1 min-w-0">
+                        <div className="text-sm font-poppins text-[#E8E8E8] truncate">{p.caption || '(no caption)'}</div>
+                        {p.promoted && <span className="text-[10px] font-oswald uppercase tracking-widest text-[#B15EFF]">Promoted</span>}
+                      </div>
+                      <button onClick={() => promote(p.id)} title="Make into a Story + News" className="px-3 py-2 rounded-md bg-gradient-to-r from-[#6A0DAD] to-[#8A2BE2] text-white text-xs font-oswald uppercase tracking-widest inline-flex items-center gap-1"><Sparkles size={14} /> Story</button>
+                      <button onClick={() => delPost(p.id)} className="text-[#BDBDBD] hover:text-red-400 shrink-0"><Trash2 size={16} /></button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+            <div className="glass rounded-2xl p-6">
+              <h2 className="font-bebas text-3xl mb-4">STORIES ({stories.length})</h2>
+              {stories.length === 0 ? <p className="text-[#BDBDBD] font-poppins text-sm">No stories yet. Use the “Story” button on a post.</p> : (
+                <div className="space-y-3 max-h-[240px] overflow-y-auto hide-scroll">
+                  {stories.map((s) => (
+                    <div key={s.id} className="flex items-center gap-3 glass rounded-xl p-3">
+                      <img src={s.image} alt="" className="w-12 h-12 rounded-full object-cover shrink-0" />
+                      <div className="flex-1 min-w-0 text-sm font-poppins text-[#E8E8E8] truncate">{s.title || s.caption || 'Story'}</div>
+                      <button onClick={() => delStory(s.id)} className="text-[#BDBDBD] hover:text-red-400"><Trash2 size={16} /></button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 /* ============================= APP ============================= */
 export default function App() {
   const [loading, setLoading] = useState(true)
   const [route, setRoute] = useState({ page: 'home', id: null })
   const [scrolled, setScrolled] = useState(false)
   const [showTop, setShowTop] = useState(false)
-  const [data, setData] = useState({ events: [], wrestlers: [], news: [] })
+  const [data, setData] = useState({ events: [], wrestlers: [], news: [], instagram: [], stories: [] })
   const [selectedEvent, setSelectedEvent] = useState(null)
   const { scrollY } = useScroll()
 
   useMotionValueEvent(scrollY, 'change', (v) => { setScrolled(v > 40); setShowTop(v > 600) })
 
+  const loadData = async () => {
+    try {
+      const [e, w, n, ig, st] = await Promise.all([
+        fetch('/api/events').then((r) => r.json()),
+        fetch('/api/wrestlers').then((r) => r.json()),
+        fetch('/api/news').then((r) => r.json()),
+        fetch('/api/instagram').then((r) => r.json()),
+        fetch('/api/stories').then((r) => r.json()),
+      ])
+      setData({
+        events: Array.isArray(e) ? e : [],
+        wrestlers: Array.isArray(w) ? w : [],
+        news: Array.isArray(n) ? n : [],
+        instagram: Array.isArray(ig) ? ig : [],
+        stories: Array.isArray(st) ? st : [],
+      })
+    } catch (err) { console.error(err) }
+  }
+
   useEffect(() => {
-    const load = async () => {
-      try {
-        const [e, w, n] = await Promise.all([
-          fetch('/api/events').then((r) => r.json()),
-          fetch('/api/wrestlers').then((r) => r.json()),
-          fetch('/api/news').then((r) => r.json()),
-        ])
-        setData({ events: Array.isArray(e) ? e : [], wrestlers: Array.isArray(w) ? w : [], news: Array.isArray(n) ? n : [] })
-      } catch (err) { console.error(err) }
-    }
-    load()
+    loadData()
     const t = setTimeout(() => setLoading(false), 2000)
     return () => clearTimeout(t)
   }, [])
@@ -1512,6 +1831,7 @@ export default function App() {
       case 'about': return <AboutPage />
       case 'contact': return <ContactPage />
       case 'merch': return <MerchPage />
+      case 'admin': return <AdminPage onDataChange={loadData} />
       case 'privacy': return <SimplePage overline="Legal" title="PRIVACY POLICY"><p>Black Amethyst Wrestling respects your privacy. We collect only the information necessary to deliver our services, process ticket orders, and communicate event updates. We never sell your personal data to third parties.</p><p>By using this website, you consent to our data practices as described in this policy. For any privacy inquiries, contact info@blackamethystwrestling.com.</p></SimplePage>
       case 'terms': return <SimplePage overline="Legal" title="TERMS OF SERVICE"><p>By accessing this website and purchasing tickets, you agree to abide by all venue rules and BAW policies. All ticket sales are final. Black Amethyst Wrestling reserves the right to refuse entry and to modify event lineups without notice.</p><p>All content, logos, and imagery are the property of Black Amethyst Wrestling and may not be reproduced without permission.</p></SimplePage>
       default: return <HomePage nav={nav} data={data} onOpenEvent={openEvent} onOpenWrestler={openWrestler} onTickets={goTickets} />
