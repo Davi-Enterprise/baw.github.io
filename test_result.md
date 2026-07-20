@@ -197,6 +197,18 @@ backend:
         -working: true
         -agent: "testing"
         -comment: "✅ TESTED: POST /api/paypal/capture-order with missing orderID correctly returns 400 with error 'orderID required'. POST with fake/unapproved orderID 'FAKEORDER123' correctly returns 502 with error (no server crash). This is expected behavior as full successful capture requires buyer approval in PayPal UI which cannot be automated in testing."
+  - task: "Image path self-heal migration (migrateImagePaths)"
+    implemented: true
+    working: true
+    file: "/app/app/api/[[...path]]/route.js"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        -working: true
+        -agent: "main"
+        -comment: "ROOT CAUSE of production images: production DB had stale image paths (e.g. wrestlers.image='/tj-slater.png', events.poster='/inaugural-poster.png') WITHOUT the /api/asset/ prefix. ensureSeed used $setOnInsert so existing docs were never updated. Added migrateImagePaths(db) called inside ensureSeed which rewrites any local path (starts with '/' and not '/api/') to '/api/asset/<file>' for wrestlers.image, events.poster, events.banner, news.image. External http(s) URLs are left untouched. Verified manually: injected stale paths into preview DB, called /api/events, confirmed all fixed to /api/asset/... and external Unsplash URLs unchanged. This self-heals production on first API call after redeploy."
+
   - task: "Asset delivery route (GET /api/asset/:filename) - deployment-proof images"
     implemented: true
     working: true
@@ -236,7 +248,7 @@ metadata:
 
 test_plan:
   current_focus:
-    - "Asset delivery route (GET /api/asset/:filename) - deployment-proof images"
+    - "Image path self-heal migration (migrateImagePaths)"
   stuck_tasks: []
   test_all: false
   test_priority: "high_first"

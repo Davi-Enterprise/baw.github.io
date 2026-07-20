@@ -242,6 +242,39 @@ async function ensureSeed(db) {
   await seedColl('wrestlers', seedWrestlers())
   await seedColl('news', seedNews())
   await seedAssets(db)
+  await migrateImagePaths(db)
+}
+
+// Self-heal stale image paths in the DB. Older seeds stored local paths like
+// "/tj-slater.png" or "/inaugural-poster.png" which do not resolve in production.
+// Rewrite any local (non-http, non-/api/) path to "/api/asset/<file>".
+async function migrateImagePaths(db) {
+  const fix = (v) => {
+    if (typeof v === 'string' && v.startsWith('/') && !v.startsWith('/api/')) {
+      return '/api/asset/' + v.replace(/^\/+/, '')
+    }
+    return v
+  }
+  const migrateColl = async (coll, fields) => {
+    try {
+      const docs = await db.collection(coll).find({}).toArray()
+      const ops = []
+      for (const d of docs) {
+        const set = {}
+        for (const f of fields) {
+          const nv = fix(d[f])
+          if (nv !== d[f]) set[f] = nv
+        }
+        if (Object.keys(set).length) {
+          ops.push({ updateOne: { filter: { id: d.id }, update: { $set: set } } })
+        }
+      }
+      if (ops.length) await db.collection(coll).bulkWrite(ops, { ordered: false })
+    } catch (e) { /* non-fatal */ }
+  }
+  await migrateColl('wrestlers', ['image'])
+  await migrateColl('events', ['poster', 'banner'])
+  await migrateColl('news', ['image'])
 }
 
 // Store image bytes in MongoDB from the bundled base64 module (deployment-proof source)
