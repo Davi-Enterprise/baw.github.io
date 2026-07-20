@@ -1597,6 +1597,13 @@ const AdminPage = ({ onDataChange }) => {
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState('')
   const fileRef = useRef(null)
+  // Direct-story form
+  const [sCaption, setSCaption] = useState('')
+  const [sLink, setSLink] = useState('')
+  const [sImg, setSImg] = useState(null)
+  const [sAsNews, setSAsNews] = useState(true)
+  const [sBusy, setSBusy] = useState(false)
+  const sFileRef = useRef(null)
 
   const loadLists = async () => {
     try {
@@ -1651,8 +1658,7 @@ const AdminPage = ({ onDataChange }) => {
     } finally { setBusy(false) }
   }
 
-  const promote = async (id) => {
-    setBusy(true)
+  const promote = async (id) => {    setBusy(true)
     try {
       await fetch(`/api/admin/instagram/${id}/promote`, { method: 'POST', headers: adminHeaders(token), body: JSON.stringify({ asNews: true, asStory: true }) })
       flash('Turned into a Story + News article!'); await loadLists(); onDataChange?.()
@@ -1666,6 +1672,24 @@ const AdminPage = ({ onDataChange }) => {
   const delStory = async (id) => {
     await fetch(`/api/admin/stories/${id}`, { method: 'DELETE', headers: adminHeaders(token, false) })
     await loadLists(); onDataChange?.()
+  }
+
+  const pickStoryImage = async (e) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    try { const res = await fileToResizedBase64(file); setSImg(res) } catch { flash('Could not read image') }
+  }
+
+  const addStory = async (e) => {
+    e.preventDefault()
+    if (!sImg) { flash('Please choose an image for the story.'); return }
+    setSBusy(true)
+    try {
+      const r = await fetch('/api/admin/stories', { method: 'POST', headers: adminHeaders(token), body: JSON.stringify({ caption: sCaption, link: sLink, asNews: sAsNews, imageBase64: sImg.base64, contentType: sImg.contentType }) })
+      const d = await r.json()
+      if (r.ok) { setSCaption(''); setSLink(''); setSImg(null); if (sFileRef.current) sFileRef.current.value = ''; flash(sAsNews ? 'Story added (and posted to News)!' : 'Story added!'); await loadLists(); onDataChange?.() }
+      else flash(d.error || 'Failed to add story')
+    } finally { setSBusy(false) }
   }
 
   if (!token) {
@@ -1754,7 +1778,7 @@ const AdminPage = ({ onDataChange }) => {
             </div>
             <div className="glass rounded-2xl p-6">
               <h2 className="font-bebas text-3xl mb-4">STORIES ({stories.length})</h2>
-              {stories.length === 0 ? <p className="text-[#BDBDBD] font-poppins text-sm">No stories yet. Use the “Story” button on a post.</p> : (
+              {stories.length === 0 ? <p className="text-[#BDBDBD] font-poppins text-sm">No stories yet. Add one directly below, or use the “Story” button on a post.</p> : (
                 <div className="space-y-3 max-h-[240px] overflow-y-auto hide-scroll">
                   {stories.map((s) => (
                     <div key={s.id} className="flex items-center gap-3 glass rounded-xl p-3">
@@ -1766,6 +1790,36 @@ const AdminPage = ({ onDataChange }) => {
                 </div>
               )}
             </div>
+          </div>
+
+          {/* Add Story directly */}
+          <div className="glass rounded-2xl p-6">
+            <h2 className="font-bebas text-3xl mb-4 flex items-center gap-2"><Sparkles size={20} className="text-[#B15EFF]" /> ADD STORY DIRECTLY</h2>
+            <form onSubmit={addStory} className="space-y-4">
+              <div>
+                <label className="text-xs font-oswald uppercase tracking-widest text-[#BDBDBD]">Caption / Title</label>
+                <Textarea value={sCaption} onChange={(e) => setSCaption(e.target.value)} rows={3} placeholder="Write your story text..." className="bg-white/5 border-white/10 mt-1 text-white placeholder:text-[#BDBDBD]/60" />
+              </div>
+              <div>
+                <label className="text-xs font-oswald uppercase tracking-widest text-[#BDBDBD]">Link (optional)</label>
+                <Input value={sLink} onChange={(e) => setSLink(e.target.value)} placeholder="https://..." className="bg-white/5 border-white/10 h-11 mt-1 text-white placeholder:text-[#BDBDBD]/60" />
+              </div>
+              <div>
+                <label className="text-xs font-oswald uppercase tracking-widest text-[#BDBDBD]">Image</label>
+                <div onClick={() => sFileRef.current?.click()} className="mt-1 border border-dashed border-white/20 rounded-xl p-4 flex items-center gap-4 cursor-pointer hover:border-[#8A2BE2] transition-colors">
+                  {sImg ? <img src={sImg.preview} alt="preview" className="w-20 h-20 rounded-lg object-cover" /> : <div className="w-20 h-20 rounded-lg bg-white/5 flex items-center justify-center"><Upload size={22} className="text-[#BDBDBD]" /></div>}
+                  <div className="text-sm text-[#BDBDBD] font-poppins">{sImg ? 'Image selected — tap to change' : 'Tap to upload a story image'}</div>
+                </div>
+                <input ref={sFileRef} type="file" accept="image/*" onChange={pickStoryImage} className="hidden" />
+              </div>
+              <label className="flex items-center gap-2 text-sm text-[#BDBDBD] font-poppins cursor-pointer">
+                <input type="checkbox" checked={sAsNews} onChange={(e) => setSAsNews(e.target.checked)} className="accent-[#8A2BE2] w-4 h-4" />
+                Also publish to Newsroom
+              </label>
+              <GlowButton type="submit" full className={sBusy ? 'opacity-70 pointer-events-none' : ''}>
+                {sBusy ? <Loader2 size={16} className="animate-spin" /> : <Sparkles size={16} />} Add Story
+              </GlowButton>
+            </form>
           </div>
         </div>
       </div>

@@ -306,10 +306,10 @@ async function getSession(request, db) {
   } catch { return null }
 }
 
-async function storeImageAsset(db, id, imageBase64, contentType) {
+async function storeImageAsset(db, id, imageBase64, contentType, prefix = 'ig') {
   const ct = contentType || 'image/jpeg'
   const ext = (ct.split('/')[1] || 'jpg').replace('jpeg', 'jpg')
-  const filename = `ig-${id}.${ext}`
+  const filename = `${prefix}-${id}.${ext}`
   await db.collection('assets').updateOne(
     { filename },
     { $set: { filename, contentType: ct, data: imageBase64 } },
@@ -477,6 +477,33 @@ async function handleRoute(request, { params }) {
         return handleCORS(NextResponse.json(rest))
       }
 
+      // Create a Story directly (no Instagram post needed)
+      if (route === '/admin/stories' && method === 'POST') {
+        const body = await request.json()
+        const id = uuidv4()
+        let image = ''
+        if (body.imageBase64) {
+          image = await storeImageAsset(db, id, body.imageBase64, body.contentType, 'st')
+        } else if (body.imageUrl) {
+          image = body.imageUrl
+        }
+        if (!image) return handleCORS(NextResponse.json({ error: 'An image is required' }, { status: 400 }))
+        const caption = body.caption || ''
+        const title = (body.title || caption.split('\n')[0] || 'Story').slice(0, 90)
+        const doc = { id, title, caption, image, link: body.link || '', createdAt: new Date() }
+        await db.collection('stories').insertOne(doc)
+        // Optionally also publish as a News article
+        if (body.asNews) {
+          await db.collection('news').insertOne({
+            id: uuidv4(), category: 'Instagram', title,
+            excerpt: caption.slice(0, 200), content: caption,
+            date: new Date().toISOString(), image, author: 'Black Amethyst Wrestling', link: body.link || '',
+          })
+        }
+        const { _id, ...rest } = doc
+        return handleCORS(NextResponse.json(rest))
+      }
+
       // Promote an Instagram post -> News article and/or Story
       if (path[1] === 'instagram' && path[3] === 'promote' && method === 'POST') {
         const igId = path[2]
@@ -521,7 +548,12 @@ async function handleRoute(request, { params }) {
 
       // Delete Story
       if (path[1] === 'stories' && path[2] && method === 'DELETE') {
+        const story = await db.collection('stories').findOne({ id: path[2] })
         await db.collection('stories').deleteOne({ id: path[2] })
+        if (story?.image?.startsWith('/api/asset/')) {
+          const fn = story.image.replace('/api/asset/', '')
+          if (fn.startsWith('st-')) await db.collection('assets').deleteOne({ filename: fn })
+        }
         return handleCORS(NextResponse.json({ ok: true }))
       }
 
