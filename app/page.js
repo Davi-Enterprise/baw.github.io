@@ -1762,6 +1762,7 @@ const AdminPage = ({ onDataChange, events = [] }) => {
   const [pType, setPType] = useState('percent')
   const [pValue, setPValue] = useState('')
   const [pMax, setPMax] = useState('')
+  const [pExpiry, setPExpiry] = useState('')
   const [pBusy, setPBusy] = useState(false)
   const [ticketLimit, setTicketLimit] = useState('')
   const [caption, setCaption] = useState('')
@@ -1805,9 +1806,9 @@ const AdminPage = ({ onDataChange, events = [] }) => {
     if (pType !== 'bogo' && (!parseFloat(pValue) || parseFloat(pValue) <= 0)) { flash('Enter a discount value.'); return }
     setPBusy(true)
     try {
-      const r = await fetch('/api/admin/promos', { method: 'POST', headers: adminHeaders(token), body: JSON.stringify({ code: pCode, type: pType, value: parseFloat(pValue) || 0, maxUses: parseInt(pMax) || 0 }) })
+      const r = await fetch('/api/admin/promos', { method: 'POST', headers: adminHeaders(token), body: JSON.stringify({ code: pCode, type: pType, value: parseFloat(pValue) || 0, maxUses: parseInt(pMax) || 0, expiresAt: pExpiry || null }) })
       const d = await r.json()
-      if (r.ok) { setPCode(''); setPValue(''); setPMax(''); flash('Promo code created!'); await loadLists() }
+      if (r.ok) { setPCode(''); setPValue(''); setPMax(''); setPExpiry(''); flash('Promo code created!'); await loadLists() }
       else flash(d.error || 'Failed to create code')
     } finally { setPBusy(false) }
   }
@@ -2278,6 +2279,11 @@ const AdminPage = ({ onDataChange, events = [] }) => {
                   <Input type="number" min="0" value={pMax} onChange={(e) => setPMax(e.target.value)} placeholder="0" className="bg-white/5 border-white/10 h-11 mt-1 text-white placeholder:text-[#BDBDBD]/60" />
                 </div>
               </div>
+              <div>
+                <label className="text-xs font-oswald uppercase tracking-widest text-[#BDBDBD]">Expiry Date (optional)</label>
+                <Input type="date" value={pExpiry} onChange={(e) => setPExpiry(e.target.value)} className="bg-white/5 border-white/10 h-11 mt-1 text-white placeholder:text-[#BDBDBD]/60 [color-scheme:dark]" />
+                <p className="text-[11px] text-[#BDBDBD]/70 font-poppins mt-1">Leave blank for no expiry. The code stops working at the end of this day.</p>
+              </div>
               <GlowButton type="submit" full className={pBusy ? 'opacity-70 pointer-events-none' : ''}>
                 {pBusy ? <Loader2 size={16} className="animate-spin" /> : <Plus size={16} />} Create Promo Code
               </GlowButton>
@@ -2294,6 +2300,11 @@ const AdminPage = ({ onDataChange, events = [] }) => {
                         <div className="text-[11px] text-[#BDBDBD] font-poppins">
                           {p.type === 'percent' ? `${p.value}% off` : p.type === 'amount' ? `$${Number(p.value).toFixed(2)} off` : 'BOGO Free'}
                           {' · '}{p.uses}{p.maxUses ? `/${p.maxUses}` : ''} used
+                          {p.expiresAt && (
+                            new Date(p.expiresAt) < new Date()
+                              ? <span className="text-red-400"> · Expired {new Date(p.expiresAt).toLocaleDateString()}</span>
+                              : <span> · Expires {new Date(p.expiresAt).toLocaleDateString()}</span>
+                          )}
                         </div>
                       </div>
                       <button onClick={() => togglePromo(p.id)} className={`text-[10px] font-oswald uppercase tracking-widest px-2 py-1 rounded ${p.active ? 'bg-green-500/20 text-green-400' : 'bg-white/10 text-[#BDBDBD]'}`}>{p.active ? 'Active' : 'Off'}</button>

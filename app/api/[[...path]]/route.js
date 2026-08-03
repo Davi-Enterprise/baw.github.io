@@ -531,6 +531,7 @@ async function handleRoute(request, { params }) {
       if (!code) return handleCORS(NextResponse.json({ valid: false, error: 'Enter a code' }))
       const promo = await db.collection('promocodes').findOne({ code })
       if (!promo || !promo.active) return handleCORS(NextResponse.json({ valid: false, error: 'Invalid or inactive code' }))
+      if (promo.expiresAt && new Date(promo.expiresAt) < new Date()) return handleCORS(NextResponse.json({ valid: false, error: 'This code has expired' }))
       if (promo.maxUses && promo.uses >= promo.maxUses) return handleCORS(NextResponse.json({ valid: false, error: 'This code has reached its usage limit' }))
       const lineItems = []
       for (const it of (body.items || [])) {
@@ -951,7 +952,16 @@ async function handleRoute(request, { params }) {
         const existing = await db.collection('promocodes').findOne({ code })
         if (existing) return handleCORS(NextResponse.json({ error: 'That code already exists' }, { status: 409 }))
         const maxUses = Math.max(0, parseInt(body.maxUses) || 0) // 0 = unlimited
-        const doc = { id: uuidv4(), code, type, value, maxUses, uses: 0, active: true, createdAt: new Date() }
+        let expiresAt = null
+        if (body.expiresAt) {
+          const d = new Date(body.expiresAt)
+          if (!isNaN(d.getTime())) {
+            // treat a date-only value (YYYY-MM-DD) as end-of-day so the code works through that whole day
+            if (/^\d{4}-\d{2}-\d{2}$/.test(String(body.expiresAt))) d.setHours(23, 59, 59, 999)
+            expiresAt = d
+          }
+        }
+        const doc = { id: uuidv4(), code, type, value, maxUses, uses: 0, active: true, expiresAt, createdAt: new Date() }
         await db.collection('promocodes').insertOne(doc)
         const { _id, ...rest } = doc
         return handleCORS(NextResponse.json(rest))
@@ -1094,6 +1104,7 @@ async function handleRoute(request, { params }) {
         promoCode = String(body.promoCode).toUpperCase().trim()
         promo = await db.collection('promocodes').findOne({ code: promoCode })
         if (!promo || !promo.active) return handleCORS(NextResponse.json({ error: 'Invalid or inactive promo code' }, { status: 400 }))
+        if (promo.expiresAt && new Date(promo.expiresAt) < new Date()) return handleCORS(NextResponse.json({ error: 'This promo code has expired' }, { status: 400 }))
         if (promo.maxUses && promo.uses >= promo.maxUses) return handleCORS(NextResponse.json({ error: 'This promo code has reached its usage limit' }, { status: 400 }))
         discount = computePromoDiscount(promo, lineItems, totalNum)
       }
