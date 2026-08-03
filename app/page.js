@@ -6,7 +6,7 @@ import {
   Menu, X, ArrowRight, ChevronRight, ChevronLeft, MapPin, Calendar, Clock,
   Ticket, Play, Instagram, Youtube, Twitter, Facebook, Search, ArrowUp,
   Trophy, Users, Zap, Mail, Phone, Send, ChevronDown, Check, Star, Share2, Flame,
-  ShoppingCart, Plus, Minus, Trash2, Upload, LogOut, Lock, Loader2, Sparkles, Pin,
+  ShoppingCart, Plus, Minus, Trash2, Upload, LogOut, Lock, Loader2, Sparkles, Pin, User, Download, Unlock,
 } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
@@ -281,10 +281,12 @@ const Navbar = ({ nav, scrolled, current, onOpen }) => {
             })}
           </nav>
           <div className="hidden lg:flex items-center gap-3">
+            <button onClick={() => go('account')} title="My Account" className="text-white/90 hover:text-[#B15EFF] transition-colors"><User size={22} /></button>
             <CartButton />
             <GlowButton onClick={() => go('tickets')} className="!px-6 !py-2.5 text-xs"><Ticket size={14} /> Buy Tickets</GlowButton>
           </div>
           <div className="lg:hidden flex items-center gap-3">
+            <button onClick={() => go('account')} title="My Account" className="text-white/90 hover:text-[#B15EFF] transition-colors"><User size={22} /></button>
             <CartButton />
             <button className="text-white" onClick={() => setMenu(true)}><Menu size={26} /></button>
           </div>
@@ -1070,7 +1072,7 @@ const WrestlerDetail = ({ w, data, nav, onOpenWrestler }) => {
 }
 
 /* ============================= MEDIA PAGE ============================= */
-const MediaPage = ({ data }) => {
+const MediaPage = ({ data, nav }) => {
   const [tab, setTab] = useState('videos')
   const [playing, setPlaying] = useState(null)
   const photos = [HERO_SLIDES[0].img, HERO_SLIDES[1].img, HERO_SLIDES[2].img, ...data.wrestlers.map((w) => w.image)]
@@ -1135,6 +1137,7 @@ const MediaPage = ({ data }) => {
           )}
         </div>
       </section>
+      <LockedVault nav={nav} />
     </div>
   )
 }
@@ -1535,6 +1538,31 @@ const fileToResizedBase64 = (file, maxDim = 1080, quality = 0.82) =>
     reader.readAsDataURL(file)
   })
 
+const fileToBlurredPreview = (file, maxDim = 500, quality = 0.6) =>
+  new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onerror = reject
+    reader.onload = () => {
+      const img = new window.Image()
+      img.onerror = reject
+      img.onload = () => {
+        let { width, height } = img
+        if (Math.max(width, height) > maxDim) {
+          if (width > height) { height = Math.round((height * maxDim) / width); width = maxDim }
+          else { width = Math.round((width * maxDim) / height); height = maxDim }
+        }
+        const canvas = document.createElement('canvas')
+        canvas.width = width; canvas.height = height
+        const ctx = canvas.getContext('2d')
+        ctx.filter = 'blur(10px)'
+        ctx.drawImage(img, 0, 0, width, height)
+        resolve(canvas.toDataURL('image/jpeg', quality).split(',')[1])
+      }
+      img.src = reader.result
+    }
+    reader.readAsDataURL(file)
+  })
+
 const StoriesBar = ({ stories, onOpen }) => {
   if (!stories || stories.length === 0) return null
   return (
@@ -1644,16 +1672,37 @@ const StoryViewer = ({ stories, index, onClose, onIndex }) => {
 const TOKEN_KEY = 'baw_admin_token'
 const adminHeaders = (token, json = true) => ({ ...(json ? { 'Content-Type': 'application/json' } : {}), Authorization: `Bearer ${token}` })
 
-const AdminPage = ({ onDataChange }) => {
+const AdminPage = ({ onDataChange, events = [] }) => {
   const [token, setToken] = useState(() => (typeof window !== 'undefined' ? (localStorage.getItem(TOKEN_KEY) || '') : ''))
   const [pw, setPw] = useState('')
   const [loginErr, setLoginErr] = useState('')
   const [posts, setPosts] = useState([])
   const [stories, setStories] = useState([])
   const [media, setMedia] = useState([])
+  const [vault, setVault] = useState([])
   const [mTitle, setMTitle] = useState('')
   const [mUrl, setMUrl] = useState('')
+  const [mType, setMType] = useState('video')
+  const [mLocked, setMLocked] = useState(false)
+  const [mPrice, setMPrice] = useState('')
+  const [mPhoto, setMPhoto] = useState(null)
   const [mBusy, setMBusy] = useState(false)
+  const mFileRef = useRef(null)
+  // Event commemorative (auto-granted on ticket purchase)
+  const [ecEvent, setEcEvent] = useState('')
+  const [ecTitle, setEcTitle] = useState('')
+  const [ecImg, setEcImg] = useState(null)
+  const [ecBusy, setEcBusy] = useState(false)
+  const [eventCommems, setEventCommems] = useState([])
+  const ecFileRef = useRef(null)
+  // Promo codes + settings
+  const [promos, setPromos] = useState([])
+  const [pCode, setPCode] = useState('')
+  const [pType, setPType] = useState('percent')
+  const [pValue, setPValue] = useState('')
+  const [pMax, setPMax] = useState('')
+  const [pBusy, setPBusy] = useState(false)
+  const [ticketLimit, setTicketLimit] = useState('')
   const [caption, setCaption] = useState('')
   const [link, setLink] = useState('')
   const [imgData, setImgData] = useState(null)
@@ -1672,31 +1721,107 @@ const AdminPage = ({ onDataChange }) => {
 
   const loadLists = async (tok = token) => {
     try {
-      const [p, s, m] = await Promise.all([
+      const [p, s, m, v, pr, st] = await Promise.all([
         fetch('/api/instagram').then((r) => r.json()),
         fetch('/api/admin/stories', { headers: adminHeaders(tok, false) }).then((r) => r.json()),
         fetch('/api/media').then((r) => r.json()),
+        fetch('/api/admin/locked-media', { headers: adminHeaders(tok, false) }).then((r) => r.json()),
+        fetch('/api/admin/promos', { headers: adminHeaders(tok, false) }).then((r) => r.json()),
+        fetch('/api/admin/settings', { headers: adminHeaders(tok, false) }).then((r) => r.json()),
       ])
       setPosts(Array.isArray(p) ? p : [])
       setStories(Array.isArray(s) ? s : [])
       setMedia(Array.isArray(m) ? m : [])
+      setVault(Array.isArray(v) ? v : [])
+      setPromos(Array.isArray(pr) ? pr : [])
+      setTicketLimit(st && st.ticketLimitPerOrder ? String(st.ticketLimitPerOrder) : '0')
     } catch {}
+  }
+
+  const addPromo = async (e) => {
+    e.preventDefault()
+    if (!pCode.trim()) { flash('Enter a code.'); return }
+    if (pType !== 'bogo' && (!parseFloat(pValue) || parseFloat(pValue) <= 0)) { flash('Enter a discount value.'); return }
+    setPBusy(true)
+    try {
+      const r = await fetch('/api/admin/promos', { method: 'POST', headers: adminHeaders(token), body: JSON.stringify({ code: pCode, type: pType, value: parseFloat(pValue) || 0, maxUses: parseInt(pMax) || 0 }) })
+      const d = await r.json()
+      if (r.ok) { setPCode(''); setPValue(''); setPMax(''); flash('Promo code created!'); await loadLists() }
+      else flash(d.error || 'Failed to create code')
+    } finally { setPBusy(false) }
+  }
+  const togglePromo = async (id) => { await fetch(`/api/admin/promos/${id}/toggle`, { method: 'POST', headers: adminHeaders(token, false) }); await loadLists() }
+  const delPromo = async (id) => { await fetch(`/api/admin/promos/${id}`, { method: 'DELETE', headers: adminHeaders(token, false) }); await loadLists() }
+  const saveLimit = async () => {
+    await fetch('/api/admin/settings', { method: 'POST', headers: adminHeaders(token), body: JSON.stringify({ ticketLimitPerOrder: parseInt(ticketLimit) || 0 }) })
+    flash('Ticket limit saved!')
+  }
+
+  const pickMediaPhoto = async (e) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    try { const res = await fileToResizedBase64(file); const preview = await fileToBlurredPreview(file); setMPhoto({ ...res, previewBase64: preview }) } catch { flash('Could not read image') }
   }
 
   const addMedia = async (e) => {
     e.preventDefault()
-    if (!mUrl.trim()) { flash('Paste a YouTube link first.'); return }
     setMBusy(true)
     try {
-      const r = await fetch('/api/admin/media', { method: 'POST', headers: adminHeaders(token), body: JSON.stringify({ title: mTitle, youtubeUrl: mUrl }) })
-      const d = await r.json()
-      if (r.ok) { setMTitle(''); setMUrl(''); flash('Video added!'); await loadLists(); onDataChange?.() }
-      else flash(d.error || 'Failed to add video')
+      let r, d
+      if (mLocked) {
+        const price = parseFloat(mPrice)
+        if (!price || price <= 0) { flash('Set a price greater than 0 for locked media.'); setMBusy(false); return }
+        if (mType === 'video') {
+          if (!mUrl.trim()) { flash('Paste a YouTube link.'); setMBusy(false); return }
+          r = await fetch('/api/admin/locked-media', { method: 'POST', headers: adminHeaders(token), body: JSON.stringify({ kind: 'video', title: mTitle, price, youtubeUrl: mUrl }) })
+        } else {
+          if (!mPhoto) { flash('Upload the photo to lock.'); setMBusy(false); return }
+          r = await fetch('/api/admin/locked-media', { method: 'POST', headers: adminHeaders(token), body: JSON.stringify({ kind: 'photo', title: mTitle, price, fullBase64: mPhoto.base64, fullContentType: mPhoto.contentType, previewBase64: mPhoto.previewBase64, previewContentType: 'image/jpeg' }) })
+        }
+      } else {
+        if (mType !== 'video') { flash('Free photos are shown automatically — only videos or LOCKED photos can be added here.'); setMBusy(false); return }
+        if (!mUrl.trim()) { flash('Paste a YouTube link.'); setMBusy(false); return }
+        r = await fetch('/api/admin/media', { method: 'POST', headers: adminHeaders(token), body: JSON.stringify({ title: mTitle, youtubeUrl: mUrl }) })
+      }
+      d = await r.json()
+      if (r.ok) { setMTitle(''); setMUrl(''); setMPrice(''); setMPhoto(null); setMLocked(false); if (mFileRef.current) mFileRef.current.value = ''; flash(mLocked ? 'Locked media added to The Vault!' : 'Video added!'); await loadLists(); onDataChange?.() }
+      else flash(d.error || 'Failed to add media')
     } finally { setMBusy(false) }
   }
   const delMedia = async (id) => {
     await fetch(`/api/admin/media/${id}`, { method: 'DELETE', headers: adminHeaders(token, false) })
     await loadLists(); onDataChange?.()
+  }
+  const delVault = async (id) => {
+    await fetch(`/api/admin/locked-media/${id}`, { method: 'DELETE', headers: adminHeaders(token, false) })
+    await loadLists(); onDataChange?.()
+  }
+
+  const pickEcImage = async (e) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    try { const res = await fileToResizedBase64(file); setEcImg(res) } catch { flash('Could not read image') }
+  }
+  const addEventCommem = async (e) => {
+    e.preventDefault()
+    if (!ecEvent) { flash('Choose an event.'); return }
+    const existing = eventCommems.find((c) => c.eventId === ecEvent)
+    if (!ecImg && !existing) { flash('Upload a card image.'); return }
+    setEcBusy(true)
+    try {
+      const r = await fetch('/api/admin/event-commemorative', { method: 'POST', headers: adminHeaders(token), body: JSON.stringify({ eventId: ecEvent, title: ecTitle, imageBase64: ecImg?.base64, contentType: ecImg?.contentType }) })
+      const d = await r.json()
+      if (r.ok) { setEcTitle(''); setEcImg(null); if (ecFileRef.current) ecFileRef.current.value = ''; flash('Commemorative set — buyers of this show get it automatically!'); await loadCommems() }
+      else flash(d.error || 'Failed to save')
+    } finally { setEcBusy(false) }
+  }
+  const loadCommems = async () => {
+    try { const c = await fetch('/api/admin/event-commemoratives', { headers: adminHeaders(token, false) }).then((r) => r.json()); setEventCommems(Array.isArray(c) ? c : []) } catch {}
+  }
+  useEffect(() => { if (token) loadCommems() }, [token])
+  const delEventCommem = async (eventId) => {
+    await fetch(`/api/admin/event-commemoratives/${eventId}`, { method: 'DELETE', headers: adminHeaders(token, false) })
+    await loadCommems()
   }
 
   useEffect(() => {
@@ -1931,41 +2056,463 @@ const AdminPage = ({ onDataChange }) => {
             </form>
           </div>
 
-          {/* Media / YouTube */}
+          {/* Media Manager (videos + locked vault) */}
           <div className="glass rounded-2xl p-6">
-            <h2 className="font-bebas text-3xl mb-4 flex items-center gap-2"><Youtube size={22} className="text-[#B15EFF]" /> MEDIA / YOUTUBE</h2>
+            <h2 className="font-bebas text-3xl mb-4 flex items-center gap-2"><Youtube size={22} className="text-[#B15EFF]" /> MEDIA MANAGER</h2>
             <form onSubmit={addMedia} className="space-y-4">
+              <div className="flex gap-2">
+                {[{ k: 'video', l: 'YouTube Video' }, { k: 'photo', l: 'Photo' }].map((t) => (
+                  <button type="button" key={t.k} onClick={() => setMType(t.k)} className={`flex-1 py-2 rounded-full font-oswald uppercase tracking-widest text-xs transition-all ${mType === t.k ? 'bg-gradient-to-r from-[#6A0DAD] to-[#8A2BE2] text-white' : 'glass text-[#BDBDBD]'}`}>{t.l}</button>
+                ))}
+              </div>
               <div>
-                <label className="text-xs font-oswald uppercase tracking-widest text-[#BDBDBD]">Video Title</label>
+                <label className="text-xs font-oswald uppercase tracking-widest text-[#BDBDBD]">Title</label>
                 <Input value={mTitle} onChange={(e) => setMTitle(e.target.value)} placeholder="e.g. Inaugural Show Highlights" className="bg-white/5 border-white/10 h-11 mt-1 text-white placeholder:text-[#BDBDBD]/60" />
               </div>
-              <div>
-                <label className="text-xs font-oswald uppercase tracking-widest text-[#BDBDBD]">YouTube Link</label>
-                <Input value={mUrl} onChange={(e) => setMUrl(e.target.value)} placeholder="https://youtu.be/... or https://youtube.com/watch?v=..." className="bg-white/5 border-white/10 h-11 mt-1 text-white placeholder:text-[#BDBDBD]/60" />
-                <p className="text-[11px] text-[#BDBDBD]/70 font-poppins mt-1">Paste any YouTube link — it will auto-embed and play on the Media page.</p>
-              </div>
+              {mType === 'video' ? (
+                <div>
+                  <label className="text-xs font-oswald uppercase tracking-widest text-[#BDBDBD]">YouTube Link</label>
+                  <Input value={mUrl} onChange={(e) => setMUrl(e.target.value)} placeholder="https://youtu.be/..." className="bg-white/5 border-white/10 h-11 mt-1 text-white placeholder:text-[#BDBDBD]/60" />
+                </div>
+              ) : (
+                <div>
+                  <label className="text-xs font-oswald uppercase tracking-widest text-[#BDBDBD]">Photo</label>
+                  <div onClick={() => mFileRef.current?.click()} className="mt-1 border border-dashed border-white/20 rounded-xl p-4 flex items-center gap-4 cursor-pointer hover:border-[#8A2BE2] transition-colors">
+                    {mPhoto ? <img src={mPhoto.preview} alt="preview" className="w-16 h-16 rounded-lg object-cover" /> : <div className="w-16 h-16 rounded-lg bg-white/5 flex items-center justify-center"><Upload size={20} className="text-[#BDBDBD]" /></div>}
+                    <div className="text-sm text-[#BDBDBD] font-poppins">{mPhoto ? 'Image selected — tap to change' : 'Tap to upload photo'}</div>
+                  </div>
+                  <input ref={mFileRef} type="file" accept="image/*" onChange={pickMediaPhoto} className="hidden" />
+                </div>
+              )}
+              {/* Lock toggle */}
+              <label className={`flex items-center gap-3 p-3 rounded-xl border cursor-pointer transition-colors ${mLocked ? 'border-[#8A2BE2] bg-[#8A2BE2]/10' : 'border-white/10'}`}>
+                <input type="checkbox" checked={mLocked} onChange={(e) => setMLocked(e.target.checked)} className="accent-[#8A2BE2] w-4 h-4" />
+                <span className="flex items-center gap-2 text-sm font-oswald uppercase tracking-widest text-white"><Lock size={15} className={mLocked ? 'text-[#B15EFF]' : 'text-[#BDBDBD]'} /> Lock behind paywall</span>
+              </label>
+              {mLocked && (
+                <div>
+                  <label className="text-xs font-oswald uppercase tracking-widest text-[#BDBDBD]">Unlock Price (USD)</label>
+                  <div className="flex items-center gap-2 mt-1">
+                    <span className="text-[#BDBDBD] font-bebas text-2xl">$</span>
+                    <Input type="number" step="0.01" min="0" value={mPrice} onChange={(e) => setMPrice(e.target.value)} placeholder="5.00" className="bg-white/5 border-white/10 h-11 text-white placeholder:text-[#BDBDBD]/60" />
+                  </div>
+                  <p className="text-[11px] text-[#BDBDBD]/70 font-poppins mt-1">Fans pay this once via PayPal to unlock it forever in their account.</p>
+                </div>
+              )}
               <GlowButton type="submit" full className={mBusy ? 'opacity-70 pointer-events-none' : ''}>
-                {mBusy ? <Loader2 size={16} className="animate-spin" /> : <Plus size={16} />} Add Video
+                {mBusy ? <Loader2 size={16} className="animate-spin" /> : (mLocked ? <Lock size={16} /> : <Plus size={16} />)} {mLocked ? 'Add to The Vault' : 'Add Video'}
+              </GlowButton>
+            </form>
+            <div className="mt-5 grid gap-5">
+              <div>
+                <h3 className="font-bebas text-2xl mb-3">FREE VIDEOS ({media.length})</h3>
+                {media.length === 0 ? <p className="text-[#BDBDBD] font-poppins text-sm">No free videos yet.</p> : (
+                  <div className="space-y-3 max-h-[180px] overflow-y-auto hide-scroll">
+                    {media.map((v) => (
+                      <div key={v.id} className="flex items-center gap-3 glass rounded-xl p-2">
+                        <img src={v.thumbnail} alt="" className="w-16 h-10 rounded object-cover shrink-0" />
+                        <div className="flex-1 min-w-0 text-sm font-poppins text-[#E8E8E8] truncate">{v.title}</div>
+                        <button onClick={() => delMedia(v.id)} className="text-[#BDBDBD] hover:text-red-400 shrink-0"><Trash2 size={16} /></button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <div>
+                <h3 className="font-bebas text-2xl mb-3 flex items-center gap-2"><Lock size={16} className="text-[#B15EFF]" /> THE VAULT ({vault.length})</h3>
+                {vault.length === 0 ? <p className="text-[#BDBDBD] font-poppins text-sm">No locked media yet.</p> : (
+                  <div className="space-y-3 max-h-[180px] overflow-y-auto hide-scroll">
+                    {vault.map((v) => (
+                      <div key={v.id} className="flex items-center gap-3 glass rounded-xl p-2">
+                        <img src={v.previewImage} alt="" className="w-12 h-12 rounded object-cover shrink-0" />
+                        <div className="flex-1 min-w-0">
+                          <div className="text-sm font-poppins text-[#E8E8E8] truncate">{v.title}</div>
+                          <div className="text-[10px] font-oswald uppercase tracking-widest text-[#B15EFF]">{v.kind} · ${Number(v.price).toFixed(2)}</div>
+                        </div>
+                        <button onClick={() => delVault(v.id)} className="text-[#BDBDBD] hover:text-red-400 shrink-0"><Trash2 size={16} /></button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* Event Commemoratives (auto-granted on ticket purchase) */}
+          <div className="glass rounded-2xl p-6">
+            <h2 className="font-bebas text-3xl mb-2 flex items-center gap-2"><Star size={20} className="text-[#B15EFF]" /> EVENT COMMEMORATIVES</h2>
+            <p className="text-[#BDBDBD] font-poppins text-sm mb-4">Pick an announced show and upload its commemorative card. Anyone who buys tickets for that show automatically gets it in their “My Account”.</p>
+            <form onSubmit={addEventCommem} className="space-y-4">
+              <div>
+                <label className="text-xs font-oswald uppercase tracking-widest text-[#BDBDBD]">Event / Show</label>
+                <select value={ecEvent} onChange={(e) => setEcEvent(e.target.value)} className="w-full h-11 mt-1 rounded-md bg-white/5 border border-white/10 text-white px-3 text-sm">
+                  <option value="" className="bg-[#0d0d0d]">Select a show…</option>
+                  {events.map((ev) => (
+                    <option key={ev.id} value={ev.id} className="bg-[#0d0d0d]">{ev.title}{ev.date ? ` — ${ev.date}` : ''}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="text-xs font-oswald uppercase tracking-widest text-[#BDBDBD]">Card Title</label>
+                <Input value={ecTitle} onChange={(e) => setEcTitle(e.target.value)} placeholder="e.g. Inaugural Show Commemorative Ticket" className="bg-white/5 border-white/10 h-11 mt-1 text-white placeholder:text-[#BDBDBD]/60" />
+              </div>
+              <div>
+                <label className="text-xs font-oswald uppercase tracking-widest text-[#BDBDBD]">Card Image</label>
+                <div onClick={() => ecFileRef.current?.click()} className="mt-1 border border-dashed border-white/20 rounded-xl p-4 flex items-center gap-4 cursor-pointer hover:border-[#8A2BE2] transition-colors">
+                  {ecImg ? <img src={ecImg.preview} alt="preview" className="w-16 h-20 rounded-lg object-cover" /> : <div className="w-16 h-20 rounded-lg bg-white/5 flex items-center justify-center"><Upload size={20} className="text-[#BDBDBD]" /></div>}
+                  <div className="text-sm text-[#BDBDBD] font-poppins">{ecImg ? 'Image selected — tap to change' : 'Tap to upload the commemorative card'}</div>
+                </div>
+                <input ref={ecFileRef} type="file" accept="image/*" onChange={pickEcImage} className="hidden" />
+              </div>
+              <GlowButton type="submit" full className={ecBusy ? 'opacity-70 pointer-events-none' : ''}>
+                {ecBusy ? <Loader2 size={16} className="animate-spin" /> : <Star size={16} />} Save Commemorative for Show
               </GlowButton>
             </form>
             <div className="mt-5">
-              <h3 className="font-bebas text-2xl mb-3">VIDEOS ({media.length})</h3>
-              {media.length === 0 ? <p className="text-[#BDBDBD] font-poppins text-sm">No videos yet.</p> : (
-                <div className="space-y-3 max-h-[260px] overflow-y-auto hide-scroll">
-                  {media.map((v) => (
-                    <div key={v.id} className="flex items-center gap-3 glass rounded-xl p-3">
-                      <img src={v.thumbnail} alt="" className="w-20 h-12 rounded object-cover shrink-0" />
-                      <div className="flex-1 min-w-0 text-sm font-poppins text-[#E8E8E8] truncate">{v.title}</div>
-                      <button onClick={() => delMedia(v.id)} className="text-[#BDBDBD] hover:text-red-400 shrink-0"><Trash2 size={16} /></button>
+              <h3 className="font-bebas text-2xl mb-3">SET FOR SHOWS ({eventCommems.length})</h3>
+              {eventCommems.length === 0 ? <p className="text-[#BDBDBD] font-poppins text-sm">None yet. Buyers only get a commemorative for shows you set up here.</p> : (
+                <div className="space-y-3 max-h-[220px] overflow-y-auto hide-scroll">
+                  {eventCommems.map((c) => (
+                    <div key={c.eventId} className="flex items-center gap-3 glass rounded-xl p-3">
+                      <img src={c.image} alt="" className="w-12 h-14 rounded object-cover shrink-0" />
+                      <div className="flex-1 min-w-0">
+                        <div className="text-sm font-poppins text-[#E8E8E8] truncate">{c.eventTitle || c.eventId}</div>
+                        <div className="text-[11px] text-[#BDBDBD] truncate">{c.title}</div>
+                      </div>
+                      <button onClick={() => delEventCommem(c.eventId)} className="text-[#BDBDBD] hover:text-red-400 shrink-0"><Trash2 size={16} /></button>
                     </div>
                   ))}
                 </div>
               )}
             </div>
           </div>
+
+          {/* Promo codes & ticket limits */}
+          <div className="glass rounded-2xl p-6">
+            <h2 className="font-bebas text-3xl mb-4 flex items-center gap-2"><Ticket size={20} className="text-[#B15EFF]" /> PROMO CODES & LIMITS</h2>
+            <form onSubmit={addPromo} className="space-y-4">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-oswald uppercase tracking-widest text-[#BDBDBD]">Code</label>
+                  <Input value={pCode} onChange={(e) => setPCode(e.target.value.toUpperCase())} placeholder="SAVE20" className="bg-white/5 border-white/10 h-11 mt-1 text-white placeholder:text-[#BDBDBD]/60 uppercase" />
+                </div>
+                <div>
+                  <label className="text-xs font-oswald uppercase tracking-widest text-[#BDBDBD]">Type</label>
+                  <select value={pType} onChange={(e) => setPType(e.target.value)} className="w-full h-11 mt-1 rounded-md bg-white/5 border border-white/10 text-white px-3 text-sm">
+                    <option value="percent" className="bg-[#0d0d0d]">% Percent Off</option>
+                    <option value="amount" className="bg-[#0d0d0d]">$ Amount Off</option>
+                    <option value="bogo" className="bg-[#0d0d0d]">Buy One Get One Free</option>
+                  </select>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                {pType !== 'bogo' && (
+                  <div>
+                    <label className="text-xs font-oswald uppercase tracking-widest text-[#BDBDBD]">{pType === 'percent' ? 'Percent (%)' : 'Amount ($)'}</label>
+                    <Input type="number" step="0.01" min="0" value={pValue} onChange={(e) => setPValue(e.target.value)} placeholder={pType === 'percent' ? '20' : '10.00'} className="bg-white/5 border-white/10 h-11 mt-1 text-white placeholder:text-[#BDBDBD]/60" />
+                  </div>
+                )}
+                <div>
+                  <label className="text-xs font-oswald uppercase tracking-widest text-[#BDBDBD]">Max Uses (0 = unlimited)</label>
+                  <Input type="number" min="0" value={pMax} onChange={(e) => setPMax(e.target.value)} placeholder="0" className="bg-white/5 border-white/10 h-11 mt-1 text-white placeholder:text-[#BDBDBD]/60" />
+                </div>
+              </div>
+              <GlowButton type="submit" full className={pBusy ? 'opacity-70 pointer-events-none' : ''}>
+                {pBusy ? <Loader2 size={16} className="animate-spin" /> : <Plus size={16} />} Create Promo Code
+              </GlowButton>
+            </form>
+
+            <div className="mt-5">
+              <h3 className="font-bebas text-2xl mb-3">ACTIVE CODES ({promos.length})</h3>
+              {promos.length === 0 ? <p className="text-[#BDBDBD] font-poppins text-sm">No promo codes yet.</p> : (
+                <div className="space-y-3 max-h-[220px] overflow-y-auto hide-scroll">
+                  {promos.map((p) => (
+                    <div key={p.id} className="flex items-center gap-3 glass rounded-xl p-3">
+                      <div className="flex-1 min-w-0">
+                        <div className="font-oswald uppercase tracking-widest text-sm text-white">{p.code}</div>
+                        <div className="text-[11px] text-[#BDBDBD] font-poppins">
+                          {p.type === 'percent' ? `${p.value}% off` : p.type === 'amount' ? `$${Number(p.value).toFixed(2)} off` : 'BOGO Free'}
+                          {' · '}{p.uses}{p.maxUses ? `/${p.maxUses}` : ''} used
+                        </div>
+                      </div>
+                      <button onClick={() => togglePromo(p.id)} className={`text-[10px] font-oswald uppercase tracking-widest px-2 py-1 rounded ${p.active ? 'bg-green-500/20 text-green-400' : 'bg-white/10 text-[#BDBDBD]'}`}>{p.active ? 'Active' : 'Off'}</button>
+                      <button onClick={() => delPromo(p.id)} className="text-[#BDBDBD] hover:text-red-400 shrink-0"><Trash2 size={16} /></button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="mt-6 pt-5 border-t border-white/10">
+              <label className="text-xs font-oswald uppercase tracking-widest text-[#BDBDBD]">Max Tickets Per Order (0 = no limit)</label>
+              <div className="flex items-center gap-2 mt-1">
+                <Input type="number" min="0" value={ticketLimit} onChange={(e) => setTicketLimit(e.target.value)} placeholder="0" className="bg-white/5 border-white/10 h-11 text-white placeholder:text-[#BDBDBD]/60" />
+                <GlowButton type="button" onClick={saveLimit} className="!px-5 !py-2.5 shrink-0">Save</GlowButton>
+              </div>
+              <p className="text-[11px] text-[#BDBDBD]/70 font-poppins mt-1">Caps how many tickets a customer can buy in a single checkout for the show.</p>
+            </div>
+          </div>
         </div>
       </div>
     </div>
+  )
+}
+
+/* ============================= FAN ACCOUNTS ============================= */
+const FAN_TOKEN = 'baw_fan_token'
+const FanContext = createContext(null)
+const useFan = () => useContext(FanContext)
+const FanProvider = ({ children }) => {
+  const [token, setToken] = useState('')
+  const [fan, setFan] = useState(null)
+  useEffect(() => {
+    const t = typeof window !== 'undefined' ? localStorage.getItem(FAN_TOKEN) : ''
+    if (!t) return
+    setToken(t)
+    fetch('/api/auth/me', { headers: { Authorization: 'Bearer ' + t } })
+      .then((r) => r.json())
+      .then((d) => { if (d.authenticated) setFan(d.user); else { localStorage.removeItem(FAN_TOKEN); setToken('') } })
+      .catch(() => {})
+  }, [])
+  const doAuth = (t, user) => { localStorage.setItem(FAN_TOKEN, t); setToken(t); setFan(user) }
+  const logout = () => {
+    if (token) fetch('/api/auth/logout', { method: 'POST', headers: { Authorization: 'Bearer ' + token } }).catch(() => {})
+    localStorage.removeItem(FAN_TOKEN); setToken(''); setFan(null)
+  }
+  return <FanContext.Provider value={{ token, fan, doAuth, logout }}>{children}</FanContext.Provider>
+}
+
+const AccountPage = ({ nav }) => {
+  const { token, fan, doAuth, logout } = useFan()
+  const [mode, setMode] = useState('login')
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
+  const [name, setName] = useState('')
+  const [err, setErr] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [lib, setLib] = useState({ items: [], unlocked: [] })
+  const [playing, setPlaying] = useState(null)
+
+  const loadLib = () => {
+    if (!token) return
+    fetch('/api/me/library', { headers: { Authorization: 'Bearer ' + token } }).then((r) => r.json()).then((d) => { if (d.items) setLib(d) }).catch(() => {})
+  }
+  useEffect(() => { loadLib() }, [token])
+
+  const submit = async (e) => {
+    e.preventDefault(); setErr(''); setBusy(true)
+    try {
+      const url = mode === 'login' ? '/api/auth/login' : '/api/auth/register'
+      const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, password, name }) })
+      const d = await r.json()
+      if (d.token) { doAuth(d.token, d.user); setPassword('') }
+      else setErr(d.error || 'Something went wrong')
+    } finally { setBusy(false) }
+  }
+
+  const tickets = lib.items.filter((i) => i.kind === 'ticket')
+  const commems = lib.items.filter((i) => i.kind !== 'ticket')
+
+  if (!fan) {
+    return (
+      <div className="min-h-screen flex items-center justify-center px-5 pt-24 pb-16 relative overflow-hidden">
+        <SmokeOverlay />
+        <div className="relative glass rounded-2xl p-8 w-full max-w-md glow">
+          <div className="flex flex-col items-center mb-6">
+            <div className="w-14 h-14 rounded-full bg-gradient-to-br from-[#6A0DAD] to-[#8A2BE2] flex items-center justify-center glow mb-3"><User size={22} /></div>
+            <h1 className="font-bebas text-4xl">{mode === 'login' ? 'FAN LOGIN' : 'CREATE ACCOUNT'}</h1>
+            <p className="text-[#BDBDBD] font-poppins text-sm mt-1">Access your tickets, commemoratives & unlocked media</p>
+          </div>
+          <div className="flex gap-2 mb-6">
+            {['login', 'register'].map((m) => (
+              <button key={m} onClick={() => { setMode(m); setErr('') }} className={`flex-1 py-2 rounded-full font-oswald uppercase tracking-widest text-xs transition-all ${mode === m ? 'bg-gradient-to-r from-[#6A0DAD] to-[#8A2BE2] text-white' : 'glass text-[#BDBDBD]'}`}>{m === 'login' ? 'Log In' : 'Sign Up'}</button>
+            ))}
+          </div>
+          <form onSubmit={submit} className="space-y-3">
+            {mode === 'register' && <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Your name" className="bg-white/5 border-white/10 h-12 text-white placeholder:text-[#BDBDBD]/60" />}
+            <Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Email" className="bg-white/5 border-white/10 h-12 text-white placeholder:text-[#BDBDBD]/60" />
+            <Input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Password (min 6 chars)" className="bg-white/5 border-white/10 h-12 text-white placeholder:text-[#BDBDBD]/60" />
+            {err && <div className="text-red-400 text-sm font-poppins">{err}</div>}
+            <GlowButton type="submit" full className={busy ? 'opacity-70 pointer-events-none' : ''}>{busy ? <Loader2 size={16} className="animate-spin" /> : null} {mode === 'login' ? 'Log In' : 'Create Account'}</GlowButton>
+          </form>
+          <p className="text-[11px] text-[#BDBDBD]/70 font-poppins mt-4 text-center">Use the same email you use at checkout so your tickets & items show up here.</p>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="min-h-screen pt-28 pb-20">
+      <AnimatePresence>
+        {playing && (
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[95] bg-black/95 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setPlaying(null)}>
+            <button onClick={() => setPlaying(null)} className="absolute top-5 right-5 z-10 text-white/80 hover:text-white"><X size={30} /></button>
+            <div className="w-full max-w-4xl aspect-video rounded-xl overflow-hidden glow border border-white/10" onClick={(e) => e.stopPropagation()}>
+              <iframe className="w-full h-full" src={`https://www.youtube.com/embed/${playing}?autoplay=1&rel=0`} title="Video" frameBorder="0" allow="autoplay; encrypted-media; fullscreen" allowFullScreen />
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+      <div className="container mx-auto px-5">
+        <div className="flex items-center justify-between mb-10">
+          <div>
+            <div className="font-oswald uppercase tracking-[0.4em] text-xs text-[#B15EFF] mb-2">Welcome{fan.name ? `, ${fan.name}` : ''}</div>
+            <h1 className="font-bebas text-6xl leading-none">MY ACCOUNT</h1>
+            <p className="text-[#BDBDBD] font-poppins text-sm mt-1">{fan.email}</p>
+          </div>
+          <GlowButton variant="outline" onClick={logout}><LogOut size={16} /> Log Out</GlowButton>
+        </div>
+
+        {/* Tickets */}
+        <h2 className="font-bebas text-3xl mb-4 flex items-center gap-2"><Ticket size={22} className="text-[#B15EFF]" /> MY TICKETS ({tickets.length})</h2>
+        {tickets.length === 0 ? <p className="text-[#BDBDBD] font-poppins text-sm mb-10">No tickets yet. Tickets you buy (with this email) will appear here with a scannable QR code.</p> : (
+          <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-5 mb-12">
+            {tickets.map((t) => (
+              <div key={t.id} className="glass rounded-2xl overflow-hidden flex">
+                <img src={t.image} alt="" className="w-24 object-cover" />
+                <div className="p-4 flex-1">
+                  <div className="font-bebas text-2xl leading-none">{t.title}</div>
+                  <div className="text-[11px] text-[#BDBDBD] font-oswald uppercase tracking-widest mt-1">{t.subtitle}</div>
+                  {t.qr && <img src={t.qr} alt="QR" className="w-20 h-20 mt-3 rounded bg-white p-1" />}
+                  <div className="text-[10px] text-[#BDBDBD]/70 font-mono mt-2">{t.code}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Commemoratives */}
+        <h2 className="font-bebas text-3xl mb-4 flex items-center gap-2"><Star size={20} className="text-[#B15EFF]" /> COMMEMORATIVES ({commems.length})</h2>
+        {commems.length === 0 ? <p className="text-[#BDBDBD] font-poppins text-sm mb-10">Your collectible cards from each show will appear here.</p> : (
+          <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-5 mb-12">
+            {commems.map((c) => (
+              <div key={c.id} className="glass rounded-2xl overflow-hidden group">
+                {c.image && <div className="aspect-[3/4] overflow-hidden"><img src={c.image} alt={c.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" /></div>}
+                <div className="p-4"><div className="font-bebas text-2xl leading-none">{c.title}</div>{c.subtitle && <div className="text-[11px] text-[#BDBDBD] font-oswald uppercase tracking-widest mt-1">{c.subtitle}</div>}</div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Unlocked media */}
+        <h2 className="font-bebas text-3xl mb-4 flex items-center gap-2"><Unlock size={20} className="text-[#B15EFF]" /> UNLOCKED MEDIA ({lib.unlocked.length})</h2>
+        {lib.unlocked.length === 0 ? <p className="text-[#BDBDBD] font-poppins text-sm">Exclusive photos & videos you unlock will appear here.</p> : (
+          <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-5">
+            {lib.unlocked.map((u) => (
+              <div key={u.id} className="glass rounded-2xl overflow-hidden group">
+                <div className="aspect-video relative overflow-hidden">
+                  <img src={u.image} alt={u.title} className="w-full h-full object-cover" />
+                  {u.kind === 'video' && <button onClick={() => setPlaying(u.videoId)} className="absolute inset-0 bg-black/40 flex items-center justify-center"><div className="w-12 h-12 rounded-full bg-gradient-to-br from-[#6A0DAD] to-[#8A2BE2] flex items-center justify-center glow"><Play size={20} className="ml-0.5" /></div></button>}
+                </div>
+                <div className="p-4 flex items-center justify-between gap-2">
+                  <div className="font-oswald uppercase tracking-widest text-sm truncate">{u.title}</div>
+                  {u.kind === 'photo' && <a href={u.fileUrl + `?t=${token}`} onClick={(e) => { e.preventDefault(); downloadGated(u.fileUrl, token, u.title) }} className="text-[#B15EFF] hover:text-white shrink-0"><Download size={18} /></a>}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// Download a gated photo using the auth header, then save via blob
+async function downloadGated(url, token, title) {
+  try {
+    const r = await fetch(url, { headers: { Authorization: 'Bearer ' + token } })
+    if (!r.ok) return
+    const blob = await r.blob()
+    const a = document.createElement('a')
+    a.href = URL.createObjectURL(blob)
+    a.download = `${(title || 'baw-photo').replace(/[^a-z0-9]/gi, '-')}.jpg`
+    document.body.appendChild(a); a.click(); a.remove()
+    setTimeout(() => URL.revokeObjectURL(a.href), 4000)
+  } catch {}
+}
+
+/* ============================= THE VAULT (locked media) ============================= */
+const LockedVault = ({ nav }) => {
+  const { token, fan } = useFan()
+  const [list, setList] = useState([])
+  const [unlockedIds, setUnlockedIds] = useState([])
+  const [active, setActive] = useState(null)
+  const clientId = process.env.NEXT_PUBLIC_PAYPAL_CLIENT_ID
+
+  const load = () => {
+    fetch('/api/locked-media').then((r) => r.json()).then((d) => setList(Array.isArray(d) ? d : [])).catch(() => {})
+    if (token) fetch('/api/me/library', { headers: { Authorization: 'Bearer ' + token } }).then((r) => r.json()).then((d) => setUnlockedIds((d.unlocked || []).map((u) => u.id))).catch(() => {})
+  }
+  useEffect(() => { load() }, [token])
+
+  if (list.length === 0) return null
+  return (
+    <section className="py-16 border-t border-white/8">
+      <div className="container mx-auto px-5">
+        <SectionHeading overline="Members Only" title="THE VAULT" subtitle="Unlock exclusive photos & videos. Yours forever once unlocked." />
+        <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-5 mt-8">
+          {list.map((m) => {
+            const owned = unlockedIds.includes(m.id)
+            return (
+              <div key={m.id} className="glass rounded-2xl overflow-hidden group relative">
+                <div className="aspect-[4/5] overflow-hidden relative">
+                  <img src={m.previewImage} alt={m.title} className={`w-full h-full object-cover ${owned ? '' : 'blur-md scale-110'}`} />
+                  {!owned && (
+                    <div className="absolute inset-0 bg-black/50 flex flex-col items-center justify-center gap-2">
+                      <Lock size={26} className="text-white" />
+                      <span className="font-bebas text-3xl">${Number(m.price).toFixed(2)}</span>
+                    </div>
+                  )}
+                  {owned && <div className="absolute top-3 right-3 bg-green-500/80 rounded-full px-3 py-1 text-[10px] font-oswald uppercase tracking-widest inline-flex items-center gap-1"><Unlock size={11} /> Unlocked</div>}
+                </div>
+                <div className="p-4 flex items-center justify-between gap-2">
+                  <div className="font-oswald uppercase tracking-widest text-sm truncate">{m.title}</div>
+                  {owned ? (
+                    <button onClick={() => nav('account')} className="text-[#B15EFF] text-xs font-oswald uppercase tracking-widest hover:underline shrink-0">View</button>
+                  ) : (
+                    <button onClick={() => setActive(m)} className="shrink-0 px-3 py-1.5 rounded-md bg-gradient-to-r from-[#6A0DAD] to-[#8A2BE2] text-white text-xs font-oswald uppercase tracking-widest inline-flex items-center gap-1"><Unlock size={13} /> Unlock</button>
+                  )}
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      </div>
+
+      {/* Unlock modal */}
+      <AnimatePresence>
+        {active && (
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[95] bg-black/90 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setActive(null)}>
+            <div className="glass rounded-2xl p-6 w-full max-w-md glow" onClick={(e) => e.stopPropagation()}>
+              <button onClick={() => setActive(null)} className="float-right text-white/70 hover:text-white"><X size={22} /></button>
+              <h3 className="font-bebas text-4xl mb-1">UNLOCK</h3>
+              <p className="font-oswald uppercase tracking-widest text-sm text-[#B15EFF] mb-4">{active.title} · ${Number(active.price).toFixed(2)}</p>
+              {!fan ? (
+                <div className="text-center py-4">
+                  <p className="text-[#BDBDBD] font-poppins text-sm mb-4">Please log in (or create a free account) to unlock and keep this item.</p>
+                  <GlowButton full onClick={() => { setActive(null); nav('account') }}><User size={16} /> Go to Fan Login</GlowButton>
+                </div>
+              ) : clientId ? (
+                <PayPalScriptProvider options={{ clientId, currency: 'USD', intent: 'capture', components: 'buttons', enableFunding: 'venmo,card' }}>
+                  <PayPalButtons
+                    style={{ layout: 'vertical', color: 'gold', shape: 'rect', label: 'paypal', height: 44 }}
+                    createOrder={async () => {
+                      const r = await fetch('/api/paypal/create-order', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ purpose: 'unlock', mediaId: active.id, email: fan.email }) })
+                      const d = await r.json(); return d.orderID
+                    }}
+                    onApprove={async (data) => {
+                      await fetch('/api/paypal/capture-order', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ orderID: data.orderID }) })
+                      setActive(null); load()
+                    }}
+                    onError={(e) => console.error('PayPal error', e)}
+                  />
+                </PayPalScriptProvider>
+              ) : <p className="text-[#BDBDBD] text-sm">Payments are not configured.</p>}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </section>
   )
 }
 
@@ -2024,12 +2571,13 @@ export default function App() {
       case 'tickets': return <TicketsPage selectedEvent={selectedEvent} data={data} />
       case 'roster': return <RosterPage data={data} onOpenWrestler={openWrestler} />
       case 'wrestler': return <WrestlerDetail w={currentWrestler} data={data} nav={nav} onOpenWrestler={openWrestler} />
-      case 'media': return <MediaPage data={data} />
+      case 'media': return <MediaPage data={data} nav={nav} />
       case 'news': return <NewsPage data={data} />
       case 'about': return <AboutPage />
       case 'contact': return <ContactPage />
       case 'merch': return <MerchPage />
-      case 'admin': return <AdminPage onDataChange={loadData} />
+      case 'account': return <AccountPage nav={nav} />
+      case 'admin': return <AdminPage onDataChange={loadData} events={data.events} />
       case 'privacy': return <SimplePage overline="Legal" title="PRIVACY POLICY"><p>Black Amethyst Wrestling respects your privacy. We collect only the information necessary to deliver our services, process ticket orders, and communicate event updates. We never sell your personal data to third parties.</p><p>By using this website, you consent to our data practices as described in this policy. For any privacy inquiries, contact info@blackamethystwrestling.com.</p></SimplePage>
       case 'terms': return <SimplePage overline="Legal" title="TERMS OF SERVICE"><p>By accessing this website and purchasing tickets, you agree to abide by all venue rules and BAW policies. All ticket sales are final. Black Amethyst Wrestling reserves the right to refuse entry and to modify event lineups without notice.</p><p>All content, logos, and imagery are the property of Black Amethyst Wrestling and may not be reproduced without permission.</p></SimplePage>
       default: return <HomePage nav={nav} data={data} onOpenEvent={openEvent} onOpenWrestler={openWrestler} onTickets={goTickets} />
@@ -2039,6 +2587,7 @@ export default function App() {
   const onSaleEvent = data.events.find((e) => e.status !== 'coming-soon')
 
   return (
+    <FanProvider>
     <CartProvider>
       <GlobalStyles />
       <AnimatePresence>{loading && <LoadingScreen />}</AnimatePresence>
@@ -2079,5 +2628,6 @@ export default function App() {
 
       <CartDrawer ev={onSaleEvent} />
     </CartProvider>
+    </FanProvider>
   )
 }

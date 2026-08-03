@@ -323,6 +323,63 @@ function extractYouTubeId(url) {
   return null
 }
 
+// Auto-grant the event's commemorative card to a ticket buyer
+async function grantEventCommemorative(db, order) {
+  if (!order || !order.email || !order.eventId) return
+  const email = String(order.email).toLowerCase().trim()
+  const evc = await db.collection('eventcommems').findOne({ eventId: order.eventId })
+  if (!evc) return
+  await db.collection('items').updateOne(
+    { email, eventId: order.eventId, kind: 'commemorative', orderId: order.id },
+    { $set: { id: uuidv4(), email, eventId: order.eventId, kind: 'commemorative', orderId: order.id, title: evc.title || 'Commemorative', subtitle: evc.eventTitle || '', image: evc.image, createdAt: new Date() } },
+    { upsert: true }
+  )
+}
+
+// Compute a promo discount against ticket line items
+function computePromoDiscount(promo, lineItems, subtotal) {
+  if (!promo) return 0
+  let d = 0
+  if (promo.type === 'percent') d = subtotal * (Math.min(100, Math.max(0, promo.value)) / 100)
+  else if (promo.type === 'amount') d = Math.max(0, promo.value)
+  else if (promo.type === 'bogo') { for (const li of lineItems) d += Math.floor((li.qty || 0) / 2) * li.unit }
+  d = Math.min(d, subtotal)
+  return Math.round(d * 100) / 100
+}
+
+// ---------- Fan (user) auth ----------
+async function getUserSession(request, db) {
+  try {
+    const auth = request.headers.get('authorization') || ''
+    const token = auth.replace(/^Bearer\s+/i, '').trim()
+    if (!token) return null
+    return await db.collection('usersessions').findOne({ token })
+  } catch { return null }
+}
+
+// Create ticket library items (with QR) for a paid order
+async function issueTicketsForOrder(db, order) {
+  if (!order || !order.email) return
+  const email = String(order.email).toLowerCase().trim()
+  if (!email) return
+  for (const li of (order.items || [])) {
+    for (let n = 0; n < (li.qty || 1); n++) {
+      const id = uuidv4()
+      const code = `BAW-${(order.id || '').slice(0, 8)}-${id.slice(0, 6)}`.toUpperCase()
+      let qr = ''
+      try { qr = await QRCode.toDataURL(code, { margin: 1, width: 240, color: { dark: '#0d0d0d', light: '#ffffff' } }) } catch {}
+      await db.collection('items').insertOne({
+        id, email, kind: 'ticket',
+        title: `${li.tier} Ticket`,
+        subtitle: 'Inaugural Show',
+        eventId: order.eventId || 'inaugural-show',
+        code, qr, image: '/api/asset/inaugural-poster.png',
+        orderId: order.id, createdAt: new Date(),
+      })
+    }
+  }
+}
+
 async function storeImageAsset(db, id, imageBase64, contentType, prefix = 'ig') {
   const ct = contentType || 'image/jpeg'
   const ext = (ct.split('/')[1] || 'jpg').replace('jpeg', 'jpg')
@@ -467,11 +524,128 @@ async function handleRoute(request, { params }) {
       return handleCORS(NextResponse.json({ reactions: (doc.reactions != null ? doc.reactions : 1) }))
     }
 
+    // ---------- Promo code validate (public) ----------
+    if (route === '/promo/validate' && method === 'POST') {
+      const body = await request.json()
+      const code = String(body.code || '').toUpperCase().trim()
+      if (!code) return handleCORS(NextResponse.json({ valid: false, error: 'Enter a code' }))
+      const promo = await db.collection('promocodes').findOne({ code })
+      if (!promo || !promo.active) return handleCORS(NextResponse.json({ valid: false, error: 'Invalid or inactive code' }))
+      if (promo.maxUses && promo.uses >= promo.maxUses) return handleCORS(NextResponse.json({ valid: false, error: 'This code has reached its usage limit' }))
+      const lineItems = []
+      for (const it of (body.items || [])) {
+        const unit = TICKET_PRICING[it.tier]
+        if (unit) lineItems.push({ tier: it.tier, qty: Math.max(1, parseInt(it.qty) || 1), unit })
+      }
+      const subtotal = lineItems.reduce((s, i) => s + i.unit * i.qty, 0)
+      const discount = computePromoDiscount(promo, lineItems, subtotal)
+      let label = ''
+      if (promo.type === 'percent') label = `${promo.value}% off`
+      else if (promo.type === 'amount') label = `$${Number(promo.value).toFixed(2)} off`
+      else label = 'Buy One Get One Free'
+      return handleCORS(NextResponse.json({ valid: true, type: promo.type, value: promo.value, label, discount, subtotal, total: Math.max(0, Math.round((subtotal - discount) * 100) / 100) }))
+    }
+
     // ---------- Media / YouTube videos (public) ----------
     if (route === '/media' && method === 'GET') {
       const vids = await db.collection('media').find({}).toArray()
       vids.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
       return handleCORS(NextResponse.json(clean(vids)))
+    }
+
+    // ---------- Locked media catalog (public, sanitized) ----------
+    if (route === '/locked-media' && method === 'GET') {
+      const list = await db.collection('lockedmedia').find({}).toArray()
+      list.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
+      const safe = list.map((m) => ({ id: m.id, kind: m.kind, title: m.title, price: m.price, previewImage: m.previewImage, createdAt: m.createdAt }))
+      return handleCORS(NextResponse.json(safe))
+    }
+
+    // ---------- Fan auth: register ----------
+    if (route === '/auth/register' && method === 'POST') {
+      const body = await request.json()
+      const email = String(body.email || '').toLowerCase().trim()
+      const password = String(body.password || '')
+      if (!email || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return handleCORS(NextResponse.json({ error: 'Please enter a valid email' }, { status: 400 }))
+      if (password.length < 6) return handleCORS(NextResponse.json({ error: 'Password must be at least 6 characters' }, { status: 400 }))
+      const existing = await db.collection('users').findOne({ email })
+      if (existing) return handleCORS(NextResponse.json({ error: 'An account with this email already exists' }, { status: 409 }))
+      const passwordHash = await bcrypt.hash(password, 10)
+      const user = { id: uuidv4(), email, name: String(body.name || '').slice(0, 80), passwordHash, createdAt: new Date() }
+      await db.collection('users').insertOne(user)
+      const token = uuidv4() + '-' + uuidv4()
+      await db.collection('usersessions').insertOne({ token, userId: user.id, email, createdAt: new Date() })
+      return handleCORS(NextResponse.json({ token, user: { email, name: user.name } }))
+    }
+
+    // ---------- Fan auth: login ----------
+    if (route === '/auth/login' && method === 'POST') {
+      const body = await request.json()
+      const email = String(body.email || '').toLowerCase().trim()
+      const password = String(body.password || '')
+      const user = await db.collection('users').findOne({ email })
+      if (!user || !(await bcrypt.compare(password, user.passwordHash))) {
+        return handleCORS(NextResponse.json({ error: 'Incorrect email or password' }, { status: 401 }))
+      }
+      const token = uuidv4() + '-' + uuidv4()
+      await db.collection('usersessions').insertOne({ token, userId: user.id, email, createdAt: new Date() })
+      return handleCORS(NextResponse.json({ token, user: { email, name: user.name } }))
+    }
+
+    // ---------- Fan auth: me ----------
+    if (route === '/auth/me' && method === 'GET') {
+      const s = await getUserSession(request, db)
+      if (!s) return handleCORS(NextResponse.json({ authenticated: false }))
+      const user = await db.collection('users').findOne({ email: s.email })
+      return handleCORS(NextResponse.json({ authenticated: true, user: user ? { email: user.email, name: user.name } : { email: s.email } }))
+    }
+
+    // ---------- Fan auth: logout ----------
+    if (route === '/auth/logout' && method === 'POST') {
+      const auth = request.headers.get('authorization') || ''
+      const token = auth.replace(/^Bearer\s+/i, '').trim()
+      if (token) await db.collection('usersessions').deleteOne({ token })
+      return handleCORS(NextResponse.json({ ok: true }))
+    }
+
+    // ---------- Fan: My Account library (items + unlocked media) ----------
+    if (route === '/me/library' && method === 'GET') {
+      const s = await getUserSession(request, db)
+      if (!s) return handleCORS(NextResponse.json({ error: 'Unauthorized' }, { status: 401 }))
+      const email = s.email
+      const items = await db.collection('items').find({ email }).toArray()
+      items.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
+      const ents = await db.collection('entitlements').find({ email }).toArray()
+      const mediaIds = ents.map((e) => e.mediaId)
+      const medias = mediaIds.length ? await db.collection('lockedmedia').find({ id: { $in: mediaIds } }).toArray() : []
+      const unlocked = medias.map((m) => ({
+        id: m.id, kind: m.kind, title: m.title,
+        image: m.previewImage,
+        videoId: m.kind === 'video' ? m.videoId : undefined,
+        fileUrl: m.kind === 'photo' ? `/api/me/unlocked/${m.id}/file` : undefined,
+      }))
+      return handleCORS(NextResponse.json({ items: clean(items), unlocked }))
+    }
+
+    // ---------- Fan: gated full photo download (entitlement required) ----------
+    if (path[0] === 'me' && path[1] === 'unlocked' && path[2] && path[3] === 'file' && method === 'GET') {
+      const s = await getUserSession(request, db)
+      if (!s) return handleCORS(NextResponse.json({ error: 'Unauthorized' }, { status: 401 }))
+      const mediaId = path[2]
+      const ent = await db.collection('entitlements').findOne({ email: s.email, mediaId })
+      if (!ent) return handleCORS(NextResponse.json({ error: 'Not unlocked' }, { status: 403 }))
+      const full = await db.collection('lockedassets').findOne({ mediaId })
+      if (!full) return handleCORS(NextResponse.json({ error: 'File not found' }, { status: 404 }))
+      const media = await db.collection('lockedmedia').findOne({ id: mediaId })
+      const fname = `${(media?.title || 'baw-photo').replace(/[^a-zA-Z0-9._-]/g, '-')}.jpg`
+      return new NextResponse(Buffer.from(full.data, 'base64'), {
+        status: 200,
+        headers: {
+          'Content-Type': full.contentType || 'image/jpeg',
+          'Content-Disposition': `attachment; filename="${fname}"`,
+          'Access-Control-Allow-Origin': '*',
+        },
+      })
     }
 
     // ---------- Admin: login ----------
@@ -645,6 +819,176 @@ async function handleRoute(request, { params }) {
         return handleCORS(NextResponse.json({ ok: true }))
       }
 
+      // Assign a library item (commemorative card / other item) to a fan by email
+      if (route === '/admin/items' && method === 'POST') {
+        const body = await request.json()
+        const email = String(body.email || '').toLowerCase().trim()
+        if (!email) return handleCORS(NextResponse.json({ error: 'Fan email is required' }, { status: 400 }))
+        const id = uuidv4()
+        let image = ''
+        if (body.imageBase64) image = await storeImageAsset(db, id, body.imageBase64, body.contentType, 'item')
+        else if (body.imageUrl) image = body.imageUrl
+        const doc = {
+          id, email, kind: body.kind === 'item' ? 'item' : 'commemorative',
+          title: (body.title || 'Commemorative').slice(0, 120),
+          subtitle: (body.subtitle || '').slice(0, 120),
+          image, createdAt: new Date(),
+        }
+        await db.collection('items').insertOne(doc)
+        const { _id, ...rest } = doc
+        return handleCORS(NextResponse.json(rest))
+      }
+
+      // Admin: list library items (optional ?email= filter)
+      if (route === '/admin/items' && method === 'GET') {
+        const em = (new URL(request.url).searchParams.get('email') || '').toLowerCase().trim()
+        const q = em ? { email: em } : {}
+        const list = await db.collection('items').find(q).toArray()
+        list.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
+        return handleCORS(NextResponse.json(clean(list)))
+      }
+
+      // Admin: delete a library item
+      if (path[1] === 'items' && path[2] && method === 'DELETE') {
+        const it = await db.collection('items').findOne({ id: path[2] })
+        await db.collection('items').deleteOne({ id: path[2] })
+        if (it?.image?.startsWith('/api/asset/item-')) {
+          await db.collection('assets').deleteOne({ filename: it.image.replace('/api/asset/', '') })
+        }
+        return handleCORS(NextResponse.json({ ok: true }))
+      }
+
+      // Admin: set an event's commemorative card (auto-granted to ticket buyers)
+      if (route === '/admin/event-commemorative' && method === 'POST') {
+        const body = await request.json()
+        const eventId = String(body.eventId || '').trim()
+        if (!eventId) return handleCORS(NextResponse.json({ error: 'Choose an event' }, { status: 400 }))
+        const ev = await db.collection('events').findOne({ id: eventId })
+        let image = ''
+        if (body.imageBase64) image = await storeImageAsset(db, eventId, body.imageBase64, body.contentType, 'evc')
+        else {
+          const cur = await db.collection('eventcommems').findOne({ eventId })
+          image = cur?.image || ''
+        }
+        if (!image) return handleCORS(NextResponse.json({ error: 'Upload a card image' }, { status: 400 }))
+        const doc = { eventId, eventTitle: ev?.title || '', title: (body.title || 'Commemorative Ticket').slice(0, 120), image, updatedAt: new Date() }
+        await db.collection('eventcommems').updateOne({ eventId }, { $set: doc }, { upsert: true })
+        return handleCORS(NextResponse.json(doc))
+      }
+
+      // Admin: list event commemoratives
+      if (route === '/admin/event-commemoratives' && method === 'GET') {
+        const list = await db.collection('eventcommems').find({}).toArray()
+        return handleCORS(NextResponse.json(clean(list)))
+      }
+
+      // Admin: delete an event commemorative
+      if (path[1] === 'event-commemoratives' && path[2] && method === 'DELETE') {
+        const evc = await db.collection('eventcommems').findOne({ eventId: path[2] })
+        await db.collection('eventcommems').deleteOne({ eventId: path[2] })
+        if (evc?.image?.startsWith('/api/asset/evc-')) await db.collection('assets').deleteOne({ filename: evc.image.replace('/api/asset/', '') })
+        return handleCORS(NextResponse.json({ ok: true }))
+      }
+
+      // Admin: create locked (pay-to-unlock) media
+      if (route === '/admin/locked-media' && method === 'POST') {
+        const body = await request.json()
+        const kind = body.kind === 'video' ? 'video' : 'photo'
+        const price = Math.max(0, parseFloat(body.price) || 0)
+        if (!price) return handleCORS(NextResponse.json({ error: 'Please set a price greater than 0' }, { status: 400 }))
+        const id = uuidv4()
+        let previewImage = ''
+        let videoId = null
+        if (body.previewBase64) previewImage = await storeImageAsset(db, id, body.previewBase64, body.previewContentType || 'image/jpeg', 'lm')
+        if (kind === 'video') {
+          videoId = extractYouTubeId(body.youtubeUrl)
+          if (!videoId) return handleCORS(NextResponse.json({ error: 'Please enter a valid YouTube link' }, { status: 400 }))
+          if (!previewImage) previewImage = `https://img.youtube.com/vi/${videoId}/hqdefault.jpg`
+        } else {
+          if (!body.fullBase64) return handleCORS(NextResponse.json({ error: 'Please upload the photo to lock' }, { status: 400 }))
+          await db.collection('lockedassets').updateOne(
+            { mediaId: id },
+            { $set: { mediaId: id, contentType: body.fullContentType || 'image/jpeg', data: body.fullBase64 } },
+            { upsert: true }
+          )
+          if (!previewImage) previewImage = await storeImageAsset(db, id, body.fullBase64, body.fullContentType || 'image/jpeg', 'lm')
+        }
+        const doc = { id, kind, title: (body.title || 'Exclusive').slice(0, 120), price, previewImage, videoId, createdAt: new Date() }
+        await db.collection('lockedmedia').insertOne(doc)
+        const { _id, ...rest } = doc
+        return handleCORS(NextResponse.json(rest))
+      }
+
+      // Admin: list locked media (full)
+      if (route === '/admin/locked-media' && method === 'GET') {
+        const list = await db.collection('lockedmedia').find({}).toArray()
+        list.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
+        return handleCORS(NextResponse.json(clean(list)))
+      }
+
+      // Admin: delete locked media
+      if (path[1] === 'locked-media' && path[2] && method === 'DELETE') {
+        const id = path[2]
+        const m = await db.collection('lockedmedia').findOne({ id })
+        await db.collection('lockedmedia').deleteOne({ id })
+        await db.collection('lockedassets').deleteOne({ mediaId: id })
+        await db.collection('entitlements').deleteMany({ mediaId: id })
+        if (m?.previewImage?.startsWith('/api/asset/lm-')) {
+          await db.collection('assets').deleteOne({ filename: m.previewImage.replace('/api/asset/', '') })
+        }
+        return handleCORS(NextResponse.json({ ok: true }))
+      }
+
+      // Admin: create a promo code
+      if (route === '/admin/promos' && method === 'POST') {
+        const body = await request.json()
+        const code = String(body.code || '').toUpperCase().trim().replace(/\s+/g, '')
+        if (!code) return handleCORS(NextResponse.json({ error: 'Enter a code' }, { status: 400 }))
+        const type = ['percent', 'amount', 'bogo'].includes(body.type) ? body.type : 'percent'
+        let value = parseFloat(body.value) || 0
+        if (type === 'percent') value = Math.min(100, Math.max(0, value))
+        if (type !== 'bogo' && value <= 0) return handleCORS(NextResponse.json({ error: 'Enter a discount value greater than 0' }, { status: 400 }))
+        const existing = await db.collection('promocodes').findOne({ code })
+        if (existing) return handleCORS(NextResponse.json({ error: 'That code already exists' }, { status: 409 }))
+        const maxUses = Math.max(0, parseInt(body.maxUses) || 0) // 0 = unlimited
+        const doc = { id: uuidv4(), code, type, value, maxUses, uses: 0, active: true, createdAt: new Date() }
+        await db.collection('promocodes').insertOne(doc)
+        const { _id, ...rest } = doc
+        return handleCORS(NextResponse.json(rest))
+      }
+
+      // Admin: list promo codes
+      if (route === '/admin/promos' && method === 'GET') {
+        const list = await db.collection('promocodes').find({}).toArray()
+        list.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
+        return handleCORS(NextResponse.json(clean(list)))
+      }
+
+      // Admin: toggle a promo code active/inactive
+      if (path[1] === 'promos' && path[2] && path[3] === 'toggle' && method === 'POST') {
+        const p = await db.collection('promocodes').findOne({ id: path[2] })
+        if (p) await db.collection('promocodes').updateOne({ id: path[2] }, { $set: { active: !p.active } })
+        return handleCORS(NextResponse.json({ ok: true, active: p ? !p.active : false }))
+      }
+
+      // Admin: delete a promo code
+      if (path[1] === 'promos' && path[2] && method === 'DELETE') {
+        await db.collection('promocodes').deleteOne({ id: path[2] })
+        return handleCORS(NextResponse.json({ ok: true }))
+      }
+
+      // Admin: get/set settings (ticket limit per order)
+      if (route === '/admin/settings' && method === 'GET') {
+        const s = await db.collection('settings').findOne({ key: 'ticketLimitPerOrder' })
+        return handleCORS(NextResponse.json({ ticketLimitPerOrder: s && s.value ? parseInt(s.value) : 0 }))
+      }
+      if (route === '/admin/settings' && method === 'POST') {
+        const body = await request.json()
+        const value = Math.max(0, parseInt(body.ticketLimitPerOrder) || 0)
+        await db.collection('settings').updateOne({ key: 'ticketLimitPerOrder' }, { $set: { key: 'ticketLimitPerOrder', value } }, { upsert: true })
+        return handleCORS(NextResponse.json({ ticketLimitPerOrder: value }))
+      }
+
       // Delete Story
       if (path[1] === 'stories' && path[2] && method === 'DELETE') {
         const story = await db.collection('stories').findOne({ id: path[2] })
@@ -693,6 +1037,36 @@ async function handleRoute(request, { params }) {
     // PayPal: create order
     if (route === '/paypal/create-order' && method === 'POST') {
       const body = await request.json()
+
+      // Purpose: unlock a locked media item (pay-to-unlock)
+      if (body.purpose === 'unlock' && body.mediaId) {
+        const media = await db.collection('lockedmedia').findOne({ id: body.mediaId })
+        if (!media) return handleCORS(NextResponse.json({ error: 'Item not found' }, { status: 404 }))
+        const email = String(body.email || '').toLowerCase().trim()
+        if (!email) return handleCORS(NextResponse.json({ error: 'Please log in first' }, { status: 400 }))
+        const value = Number(media.price).toFixed(2)
+        const orderDoc = { id: uuidv4(), purpose: 'unlock', mediaId: media.id, mediaTitle: media.title, amount: media.price, email, status: 'pending', createdAt: new Date() }
+        const token = await getPayPalAccessToken()
+        const res = await fetch(`${PAYPAL_BASE}/v2/checkout/orders`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            intent: 'CAPTURE',
+            purchase_units: [{
+              custom_id: orderDoc.id,
+              description: `BAW Unlock: ${media.title}`.slice(0, 127),
+              amount: { currency_code: 'USD', value },
+            }],
+            application_context: { brand_name: 'Black Amethyst Wrestling', shipping_preference: 'NO_SHIPPING', user_action: 'PAY_NOW' },
+          }),
+        })
+        const data = await res.json()
+        if (!res.ok) return handleCORS(NextResponse.json({ error: 'PayPal order failed', details: data }, { status: 502 }))
+        orderDoc.paypalOrderId = data.id
+        await db.collection('orders').insertOne(orderDoc)
+        return handleCORS(NextResponse.json({ orderID: data.id }))
+      }
+
       const rawItems = Array.isArray(body.items) && body.items.length
         ? body.items
         : (body.tier ? [{ tier: body.tier, qty: body.qty }] : [])
@@ -705,9 +1079,30 @@ async function handleRoute(request, { params }) {
       }
       if (!lineItems.length) return handleCORS(NextResponse.json({ error: 'Cart is empty' }, { status: 400 }))
       const totalNum = lineItems.reduce((s, i) => s + i.amount, 0)
-      const total = totalNum.toFixed(2)
+
+      // Enforce ticket limit per order (0 = unlimited)
+      const limitSetting = await db.collection('settings').findOne({ key: 'ticketLimitPerOrder' })
+      const ticketLimit = limitSetting && limitSetting.value ? parseInt(limitSetting.value) : 0
+      const totalQty = lineItems.reduce((s, i) => s + i.qty, 0)
+      if (ticketLimit > 0 && totalQty > ticketLimit) {
+        return handleCORS(NextResponse.json({ error: `You can buy at most ${ticketLimit} tickets per order for this show.` }, { status: 400 }))
+      }
+
+      // Apply promo code (if provided)
+      let promo = null, discount = 0, promoCode = ''
+      if (body.promoCode) {
+        promoCode = String(body.promoCode).toUpperCase().trim()
+        promo = await db.collection('promocodes').findOne({ code: promoCode })
+        if (!promo || !promo.active) return handleCORS(NextResponse.json({ error: 'Invalid or inactive promo code' }, { status: 400 }))
+        if (promo.maxUses && promo.uses >= promo.maxUses) return handleCORS(NextResponse.json({ error: 'This promo code has reached its usage limit' }, { status: 400 }))
+        discount = computePromoDiscount(promo, lineItems, totalNum)
+      }
+      let finalNum = Math.max(0, Math.round((totalNum - discount) * 100) / 100)
+      if (finalNum < 0.5) finalNum = 0.5 // PayPal requires a positive amount
+      const total = finalNum.toFixed(2)
       const orderDoc = {
-        id: uuidv4(), items: lineItems, amount: totalNum,
+        id: uuidv4(), items: lineItems, subtotal: totalNum, discount, amount: finalNum,
+        promoCode: promoCode || null,
         email: body.email || '', eventId: body.eventId || 'inaugural-show',
         status: 'pending', createdAt: new Date(),
       }
@@ -723,7 +1118,10 @@ async function handleRoute(request, { params }) {
             amount: {
               currency_code: 'USD',
               value: total,
-              breakdown: { item_total: { currency_code: 'USD', value: total } },
+              breakdown: {
+                item_total: { currency_code: 'USD', value: totalNum.toFixed(2) },
+                ...(discount > 0 ? { discount: { currency_code: 'USD', value: Math.min(discount, totalNum).toFixed(2) } } : {}),
+              },
             },
             items: lineItems.map((i) => ({
               name: `${i.tier} Ticket`.slice(0, 127),
@@ -756,10 +1154,34 @@ async function handleRoute(request, { params }) {
       const status = data.status
       const capture = data?.purchase_units?.[0]?.payments?.captures?.[0]
       const payerEmail = data?.payer?.email_address || ''
+      const order = await db.collection('orders').findOne({ paypalOrderId: orderID })
+      const alreadyPaid = order && order.status === 'paid'
       await db.collection('orders').updateOne(
         { paypalOrderId: orderID },
         { $set: { status: status === 'COMPLETED' ? 'paid' : status, capturedAt: new Date(), captureId: capture?.id || '', payerEmail } }
       )
+      // Fulfillment on first successful capture only
+      if (status === 'COMPLETED' && order && !alreadyPaid) {
+        try {
+          if (order.purpose === 'unlock') {
+            const email = (order.email || payerEmail || '').toLowerCase().trim()
+            if (email && order.mediaId) {
+              await db.collection('entitlements').updateOne(
+                { email, mediaId: order.mediaId },
+                { $set: { id: uuidv4(), email, mediaId: order.mediaId, title: order.mediaTitle || '', createdAt: new Date() } },
+                { upsert: true }
+              )
+            }
+          } else {
+            const ord = { ...order, email: (order.email || payerEmail) }
+            await issueTicketsForOrder(db, ord)
+            await grantEventCommemorative(db, ord)
+            if (order.promoCode) {
+              await db.collection('promocodes').updateOne({ code: order.promoCode }, { $inc: { uses: 1 } })
+            }
+          }
+        } catch (e) { console.error('fulfillment error', e) }
+      }
       return handleCORS(NextResponse.json({ status, orderID, captureId: capture?.id || '' }))
     }
 
