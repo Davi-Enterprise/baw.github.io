@@ -422,9 +422,32 @@ async function handleRoute(request, { params }) {
 
     // ---------- Stories (public) ----------
     if (route === '/stories' && method === 'GET') {
-      const stories = await db.collection('stories').find({}).toArray()
-      stories.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
-      return handleCORS(NextResponse.json(clean(stories)))
+      const now = new Date()
+      const all = await db.collection('stories').find({}).toArray()
+      // Only show stories that are published (no schedule, or scheduled time has passed)
+      const visible = all.filter((s) => !s.publishAt || new Date(s.publishAt) <= now)
+      visible.sort((a, b) => {
+        if (!!b.featured !== !!a.featured) return (b.featured ? 1 : 0) - (a.featured ? 1 : 0)
+        return new Date(b.publishAt || b.createdAt) - new Date(a.publishAt || a.createdAt)
+      })
+      return handleCORS(NextResponse.json(clean(visible)))
+    }
+
+    // ---------- Story reactions (public): tap a flame ----------
+    if (path[0] === 'stories' && path[1] && path[2] === 'react' && method === 'POST') {
+      const id = path[1]
+      const r = await db.collection('stories').findOneAndUpdate(
+        { id },
+        { $inc: { reactions: 1 } },
+        { returnDocument: 'after' }
+      )
+      const doc = r && (r.value || r)
+      if (!doc || (doc && doc.value === null)) {
+        const exists = await db.collection('stories').findOne({ id })
+        if (!exists) return handleCORS(NextResponse.json({ error: 'Story not found' }, { status: 404 }))
+        return handleCORS(NextResponse.json({ reactions: exists.reactions || 1 }))
+      }
+      return handleCORS(NextResponse.json({ reactions: (doc.reactions != null ? doc.reactions : 1) }))
     }
 
     // ---------- Admin: login ----------
@@ -490,10 +513,15 @@ async function handleRoute(request, { params }) {
         if (!image) return handleCORS(NextResponse.json({ error: 'An image is required' }, { status: 400 }))
         const caption = body.caption || ''
         const title = (body.title || caption.split('\n')[0] || 'Story').slice(0, 90)
-        const doc = { id, title, caption, image, link: body.link || '', createdAt: new Date() }
+        let publishAt = null
+        if (body.publishAt) {
+          const d = new Date(body.publishAt)
+          if (!isNaN(d.getTime())) publishAt = d
+        }
+        const doc = { id, title, caption, image, link: body.link || '', featured: !!body.featured, publishAt, reactions: 0, createdAt: new Date() }
         await db.collection('stories').insertOne(doc)
-        // Optionally also publish as a News article
-        if (body.asNews) {
+        // Optionally also publish as a News article (only if not scheduled for the future)
+        if (body.asNews && (!publishAt || publishAt <= new Date())) {
           await db.collection('news').insertOne({
             id: uuidv4(), category: 'Instagram', title,
             excerpt: caption.slice(0, 200), content: caption,
@@ -517,7 +545,7 @@ async function handleRoute(request, { params }) {
         const firstLine = (caption.split('\n')[0] || 'From Instagram').slice(0, 90)
         if (asStory) {
           const sid = uuidv4()
-          await db.collection('stories').insertOne({ id: sid, title: firstLine, image: post.image, caption, link: post.link || '', createdAt: new Date() })
+          await db.collection('stories').insertOne({ id: sid, title: firstLine, image: post.image, caption, link: post.link || '', featured: false, publishAt: null, reactions: 0, createdAt: new Date() })
           result.storyId = sid
         }
         if (asNews) {
@@ -544,6 +572,28 @@ async function handleRoute(request, { params }) {
           if (fn.startsWith('ig-')) await db.collection('assets').deleteOne({ filename: fn })
         }
         return handleCORS(NextResponse.json({ ok: true }))
+      }
+
+      // Admin: list ALL stories (including scheduled/future) for the dashboard
+      if (route === '/admin/stories' && method === 'GET') {
+        const all = await db.collection('stories').find({}).toArray()
+        const now = new Date()
+        all.sort((a, b) => {
+          if (!!b.featured !== !!a.featured) return (b.featured ? 1 : 0) - (a.featured ? 1 : 0)
+          return new Date(b.publishAt || b.createdAt) - new Date(a.publishAt || a.createdAt)
+        })
+        const withState = all.map(({ _id, ...s }) => ({
+          ...s,
+          scheduled: !!(s.publishAt && new Date(s.publishAt) > now),
+        }))
+        return handleCORS(NextResponse.json(withState))
+      }
+
+      // Admin: pin/unpin a story (feature)
+      if (path[1] === 'stories' && path[2] && path[3] === 'feature' && method === 'POST') {
+        const body = await request.json().catch(() => ({}))
+        await db.collection('stories').updateOne({ id: path[2] }, { $set: { featured: !!body.featured } })
+        return handleCORS(NextResponse.json({ ok: true, featured: !!body.featured }))
       }
 
       // Delete Story

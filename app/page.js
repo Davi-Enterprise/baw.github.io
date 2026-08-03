@@ -6,7 +6,7 @@ import {
   Menu, X, ArrowRight, ChevronRight, ChevronLeft, MapPin, Calendar, Clock,
   Ticket, Play, Instagram, Youtube, Twitter, Facebook, Search, ArrowUp,
   Trophy, Users, Zap, Mail, Phone, Send, ChevronDown, Check, Star, Share2, Flame,
-  ShoppingCart, Plus, Minus, Trash2, Upload, LogOut, Lock, Loader2, Sparkles,
+  ShoppingCart, Plus, Minus, Trash2, Upload, LogOut, Lock, Loader2, Sparkles, Pin,
 } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
@@ -1527,8 +1527,14 @@ const StoriesBar = ({ stories, onOpen }) => {
   )
 }
 
+const REACTED_KEY = 'baw_story_reactions'
 const StoryViewer = ({ stories, index, onClose, onIndex }) => {
   const active = index != null && stories[index]
+  const [counts, setCounts] = useState({})
+  const [reacted, setReacted] = useState({})
+  useEffect(() => {
+    try { setReacted(JSON.parse(localStorage.getItem(REACTED_KEY) || '{}')) } catch {}
+  }, [])
   useEffect(() => {
     if (index == null) return
     const onKey = (e) => {
@@ -1539,6 +1545,22 @@ const StoryViewer = ({ stories, index, onClose, onIndex }) => {
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [index, stories, onClose, onIndex])
+
+  const getCount = (s) => (counts[s.id] != null ? counts[s.id] : (s.reactions || 0))
+  const react = async (s) => {
+    if (reacted[s.id]) return
+    const optimistic = getCount(s) + 1
+    setCounts((c) => ({ ...c, [s.id]: optimistic }))
+    const nextReacted = { ...reacted, [s.id]: true }
+    setReacted(nextReacted)
+    try { localStorage.setItem(REACTED_KEY, JSON.stringify(nextReacted)) } catch {}
+    try {
+      const r = await fetch(`/api/stories/${s.id}/react`, { method: 'POST' })
+      const d = await r.json()
+      if (d && typeof d.reactions === 'number') setCounts((c) => ({ ...c, [s.id]: d.reactions }))
+    } catch {}
+  }
+
   return (
     <AnimatePresence>
       {active && (
@@ -1565,11 +1587,18 @@ const StoryViewer = ({ stories, index, onClose, onIndex }) => {
                 <span className="font-oswald uppercase tracking-widest text-xs text-[#B15EFF]">@blackamethystwrestling</span>
               </div>
               {active.caption && <p className="text-sm text-[#E8E8E8] font-poppins font-300 whitespace-pre-line line-clamp-5">{active.caption}</p>}
-              {active.link && (
-                <a href={active.link} target="_blank" rel="noreferrer" className="mt-3 inline-flex items-center gap-1 text-[#B15EFF] font-oswald uppercase tracking-widest text-xs hover:underline">
-                  View on Instagram <ArrowRight size={14} />
-                </a>
-              )}
+              <div className="mt-4 flex items-center justify-between">
+                <button onClick={() => react(active)} disabled={!!reacted[active.id]}
+                  className={`inline-flex items-center gap-2 px-4 py-2 rounded-full border transition-all ${reacted[active.id] ? 'border-orange-500/60 bg-orange-500/15 text-orange-400 cursor-default' : 'border-white/15 hover:border-orange-500/60 hover:bg-orange-500/10 text-[#E8E8E8] active:scale-95'}`}>
+                  <Flame size={18} className={reacted[active.id] ? 'text-orange-400 fill-orange-400' : ''} />
+                  <span className="font-oswald text-sm">{getCount(active)}</span>
+                </button>
+                {active.link && (
+                  <a href={active.link} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-[#B15EFF] font-oswald uppercase tracking-widest text-xs hover:underline">
+                    View on Instagram <ArrowRight size={14} />
+                  </a>
+                )}
+              </div>
             </div>
           </motion.div>
           {index < stories.length - 1 && (
@@ -1602,14 +1631,16 @@ const AdminPage = ({ onDataChange }) => {
   const [sLink, setSLink] = useState('')
   const [sImg, setSImg] = useState(null)
   const [sAsNews, setSAsNews] = useState(true)
+  const [sFeatured, setSFeatured] = useState(false)
+  const [sSchedule, setSSchedule] = useState('')
   const [sBusy, setSBusy] = useState(false)
   const sFileRef = useRef(null)
 
-  const loadLists = async () => {
+  const loadLists = async (tok = token) => {
     try {
       const [p, s] = await Promise.all([
         fetch('/api/instagram').then((r) => r.json()),
-        fetch('/api/stories').then((r) => r.json()),
+        fetch('/api/admin/stories', { headers: adminHeaders(tok, false) }).then((r) => r.json()),
       ])
       setPosts(Array.isArray(p) ? p : [])
       setStories(Array.isArray(s) ? s : [])
@@ -1620,7 +1651,7 @@ const AdminPage = ({ onDataChange }) => {
     if (!token) return
     fetch('/api/admin/me', { headers: adminHeaders(token, false) })
       .then((r) => r.json())
-      .then((d) => { if (d.authenticated) { loadLists() } else { localStorage.removeItem(TOKEN_KEY); setToken('') } })
+      .then((d) => { if (d.authenticated) { loadLists(token) } else { localStorage.removeItem(TOKEN_KEY); setToken('') } })
       .catch(() => {})
   }, [])
 
@@ -1629,7 +1660,7 @@ const AdminPage = ({ onDataChange }) => {
     setLoginErr('')
     const r = await fetch('/api/admin/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: pw }) })
     const d = await r.json()
-    if (d.token) { localStorage.setItem(TOKEN_KEY, d.token); setToken(d.token); setPw(''); loadLists() }
+    if (d.token) { localStorage.setItem(TOKEN_KEY, d.token); setToken(d.token); setPw(''); loadLists(d.token) }
     else setLoginErr(d.error || 'Login failed')
   }
 
@@ -1685,11 +1716,20 @@ const AdminPage = ({ onDataChange }) => {
     if (!sImg) { flash('Please choose an image for the story.'); return }
     setSBusy(true)
     try {
-      const r = await fetch('/api/admin/stories', { method: 'POST', headers: adminHeaders(token), body: JSON.stringify({ caption: sCaption, link: sLink, asNews: sAsNews, imageBase64: sImg.base64, contentType: sImg.contentType }) })
+      const publishAt = sSchedule ? new Date(sSchedule).toISOString() : null
+      const r = await fetch('/api/admin/stories', { method: 'POST', headers: adminHeaders(token), body: JSON.stringify({ caption: sCaption, link: sLink, asNews: sAsNews, featured: sFeatured, publishAt, imageBase64: sImg.base64, contentType: sImg.contentType }) })
       const d = await r.json()
-      if (r.ok) { setSCaption(''); setSLink(''); setSImg(null); if (sFileRef.current) sFileRef.current.value = ''; flash(sAsNews ? 'Story added (and posted to News)!' : 'Story added!'); await loadLists(); onDataChange?.() }
-      else flash(d.error || 'Failed to add story')
+      if (r.ok) {
+        setSCaption(''); setSLink(''); setSImg(null); setSFeatured(false); setSSchedule(''); if (sFileRef.current) sFileRef.current.value = ''
+        flash(publishAt && new Date(publishAt) > new Date() ? 'Story scheduled!' : (sAsNews ? 'Story added (and posted to News)!' : 'Story added!'))
+        await loadLists(); onDataChange?.()
+      } else flash(d.error || 'Failed to add story')
     } finally { setSBusy(false) }
+  }
+
+  const toggleFeature = async (story) => {
+    await fetch(`/api/admin/stories/${story.id}/feature`, { method: 'POST', headers: adminHeaders(token), body: JSON.stringify({ featured: !story.featured }) })
+    await loadLists(); onDataChange?.()
   }
 
   if (!token) {
@@ -1783,8 +1823,16 @@ const AdminPage = ({ onDataChange }) => {
                   {stories.map((s) => (
                     <div key={s.id} className="flex items-center gap-3 glass rounded-xl p-3">
                       <img src={s.image} alt="" className="w-12 h-12 rounded-full object-cover shrink-0" />
-                      <div className="flex-1 min-w-0 text-sm font-poppins text-[#E8E8E8] truncate">{s.title || s.caption || 'Story'}</div>
-                      <button onClick={() => delStory(s.id)} className="text-[#BDBDBD] hover:text-red-400"><Trash2 size={16} /></button>
+                      <div className="flex-1 min-w-0">
+                        <div className="text-sm font-poppins text-[#E8E8E8] truncate">{s.title || s.caption || 'Story'}</div>
+                        <div className="flex flex-wrap items-center gap-2 mt-1">
+                          {s.featured && <span className="inline-flex items-center gap-1 text-[10px] font-oswald uppercase tracking-widest text-[#B15EFF]"><Pin size={11} /> Pinned</span>}
+                          {s.scheduled && <span className="inline-flex items-center gap-1 text-[10px] font-oswald uppercase tracking-widest text-amber-400"><Clock size={11} /> {new Date(s.publishAt).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>}
+                          {s.reactions > 0 && <span className="inline-flex items-center gap-1 text-[10px] font-oswald uppercase tracking-widest text-[#BDBDBD]"><Flame size={11} className="text-orange-400" /> {s.reactions}</span>}
+                        </div>
+                      </div>
+                      <button onClick={() => toggleFeature(s)} title={s.featured ? 'Unpin' : 'Pin to front'} className={`shrink-0 ${s.featured ? 'text-[#B15EFF]' : 'text-[#BDBDBD] hover:text-[#B15EFF]'}`}><Pin size={16} /></button>
+                      <button onClick={() => delStory(s.id)} className="text-[#BDBDBD] hover:text-red-400 shrink-0"><Trash2 size={16} /></button>
                     </div>
                   ))}
                 </div>
@@ -1812,9 +1860,18 @@ const AdminPage = ({ onDataChange }) => {
                 </div>
                 <input ref={sFileRef} type="file" accept="image/*" onChange={pickStoryImage} className="hidden" />
               </div>
+              <div>
+                <label className="text-xs font-oswald uppercase tracking-widest text-[#BDBDBD]">Schedule for (optional)</label>
+                <Input type="datetime-local" value={sSchedule} onChange={(e) => setSSchedule(e.target.value)} className="bg-white/5 border-white/10 h-11 mt-1 text-white [color-scheme:dark]" />
+                <p className="text-[11px] text-[#BDBDBD]/70 font-poppins mt-1">Leave blank to publish now. Scheduled stories stay hidden on the site until this time.</p>
+              </div>
               <label className="flex items-center gap-2 text-sm text-[#BDBDBD] font-poppins cursor-pointer">
                 <input type="checkbox" checked={sAsNews} onChange={(e) => setSAsNews(e.target.checked)} className="accent-[#8A2BE2] w-4 h-4" />
                 Also publish to Newsroom
+              </label>
+              <label className="flex items-center gap-2 text-sm text-[#BDBDBD] font-poppins cursor-pointer">
+                <input type="checkbox" checked={sFeatured} onChange={(e) => setSFeatured(e.target.checked)} className="accent-[#8A2BE2] w-4 h-4" />
+                Pin to front of Stories bar
               </label>
               <GlowButton type="submit" full className={sBusy ? 'opacity-70 pointer-events-none' : ''}>
                 {sBusy ? <Loader2 size={16} className="animate-spin" /> : <Sparkles size={16} />} Add Story
