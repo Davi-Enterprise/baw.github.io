@@ -6,7 +6,7 @@ import {
   Menu, X, ArrowRight, ChevronRight, ChevronLeft, MapPin, Calendar, Clock,
   Ticket, Play, Instagram, Youtube, Twitter, Facebook, Search, ArrowUp,
   Trophy, Users, Zap, Mail, Phone, Send, ChevronDown, Check, Star, Share2, Flame,
-  ShoppingCart, Plus, Minus, Trash2, Upload, LogOut, Lock, Loader2, Sparkles, Pin, User, Download, Unlock,
+  ShoppingCart, Plus, Minus, Trash2, Upload, LogOut, Lock, Loader2, Sparkles, Pin, User, Download, Unlock, Tag,
 } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
@@ -1420,7 +1420,26 @@ const CartDrawer = ({ ev }) => {
   const [email, setEmail] = useState('')
   const [paid, setPaid] = useState(null)
   const [err, setErr] = useState('')
+  const [promoInput, setPromoInput] = useState('')
+  const [promo, setPromo] = useState(null)
+  const [promoErr, setPromoErr] = useState('')
+  const [applying, setApplying] = useState(false)
   const clientId = process.env.NEXT_PUBLIC_PAYPAL_CLIENT_ID
+  const applyPromo = async (silent = false) => {
+    const code = promoInput.trim()
+    if (!code) return
+    if (!silent) setApplying(true)
+    setPromoErr('')
+    try {
+      const r = await fetch('/api/promo/validate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code, items: cart.items.map((i) => ({ tier: i.tier, qty: i.qty })) }) })
+      const d = await r.json()
+      if (d.valid) { setPromo({ code: code.toUpperCase(), label: d.label, discount: d.discount, total: d.total }); setPromoErr('') }
+      else { setPromo(null); setPromoErr(d.error || 'Invalid code') }
+    } catch { setPromo(null); setPromoErr('Could not validate code') } finally { if (!silent) setApplying(false) }
+  }
+  const removePromo = () => { setPromo(null); setPromoInput(''); setPromoErr('') }
+  useEffect(() => { if (promo && cart.items.length) applyPromo(true) }, [cart.total, cart.count])
+  const grandTotal = promo ? promo.total : cart.total
   const close = () => { cart.setOpen(false); setTimeout(() => { setPaid(null); setErr('') }, 300) }
   return (
     <AnimatePresence>
@@ -1474,8 +1493,50 @@ const CartDrawer = ({ ev }) => {
                   ))}
                 </div>
                 <div className="p-5 border-t border-white/8 space-y-3">
+                  {/* Promo code */}
+                  {promo ? (
+                    <div className="flex items-center justify-between gap-2 rounded-lg border border-[#8A2BE2]/50 bg-[#8A2BE2]/10 px-3 py-2.5">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <Tag size={16} className="text-[#B15EFF] shrink-0" />
+                        <div className="min-w-0">
+                          <div className="font-oswald uppercase tracking-wide text-sm text-white truncate">{promo.code} <span className="text-green-400 normal-case font-poppins text-xs">applied</span></div>
+                          <div className="text-[11px] text-[#BDBDBD] font-poppins truncate">{promo.label} · −${Number(promo.discount).toFixed(2)}</div>
+                        </div>
+                      </div>
+                      <button onClick={removePromo} className="text-[#BDBDBD] hover:text-red-400 text-xs font-oswald uppercase tracking-wide shrink-0">Remove</button>
+                    </div>
+                  ) : (
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <div className="relative flex-1">
+                          <Tag size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#BDBDBD]/70" />
+                          <Input
+                            value={promoInput}
+                            onChange={(e) => { setPromoInput(e.target.value.toUpperCase()); if (promoErr) setPromoErr('') }}
+                            onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); applyPromo() } }}
+                            placeholder="Promo code"
+                            className="bg-white/5 border-white/10 h-11 pl-9 text-white uppercase tracking-wide placeholder:text-[#BDBDBD]/60 placeholder:normal-case"
+                          />
+                        </div>
+                        <button
+                          onClick={() => applyPromo()}
+                          disabled={applying || !promoInput.trim()}
+                          className="h-11 px-4 rounded-md glass font-oswald uppercase tracking-wide text-sm text-white hover:bg-white/10 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2"
+                        >
+                          {applying ? <Loader2 size={15} className="animate-spin" /> : 'Apply'}
+                        </button>
+                      </div>
+                      {promoErr && <div className="text-red-400 text-xs font-poppins mt-1.5">{promoErr}</div>}
+                    </div>
+                  )}
+                  {promo && (
+                    <div className="space-y-1 text-sm font-poppins">
+                      <div className="flex justify-between text-[#BDBDBD]"><span>Subtotal</span><span>${cart.total.toFixed(2)}</span></div>
+                      <div className="flex justify-between text-green-400"><span>Discount</span><span>−${Number(promo.discount).toFixed(2)}</span></div>
+                    </div>
+                  )}
                   <div className="flex justify-between items-center font-bebas text-3xl">
-                    <span>TOTAL</span><span className="amethyst-text">${cart.total.toFixed(2)}</span>
+                    <span>TOTAL</span><span className="amethyst-text">${grandTotal.toFixed(2)}</span>
                   </div>
                   <Input value={email} onChange={(e) => setEmail(e.target.value)} type="email" placeholder="Email for your receipt"
                     className="bg-white/5 border-white/10 h-11 text-white placeholder:text-[#BDBDBD]/60" />
@@ -1484,10 +1545,10 @@ const CartDrawer = ({ ev }) => {
                     <PayPalScriptProvider options={{ clientId, currency: 'USD', intent: 'capture', components: 'buttons', enableFunding: 'venmo,card' }}>
                       <PayPalButtons
                         style={{ layout: 'vertical', color: 'gold', shape: 'rect', label: 'paypal', height: 45 }}
-                        forceReRender={[cart.total, cart.count]}
+                        forceReRender={[cart.total, cart.count, promo?.code]}
                         createOrder={async () => {
                           setErr('')
-                          const r = await fetch('/api/paypal/create-order', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ items: cart.items.map((i) => ({ tier: i.tier, qty: i.qty })), email, eventId: ev?.id }) })
+                          const r = await fetch('/api/paypal/create-order', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ items: cart.items.map((i) => ({ tier: i.tier, qty: i.qty })), email, eventId: ev?.id, promoCode: promo?.code || undefined }) })
                           const d = await r.json()
                           if (!d.orderID) { setErr('Could not start checkout. Please try again.'); throw new Error('no order id') }
                           return d.orderID
