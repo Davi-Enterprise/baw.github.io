@@ -2,6 +2,8 @@ import { MongoClient } from 'mongodb'
 import { v4 as uuidv4 } from 'uuid'
 import { NextResponse } from 'next/server'
 import { readFile } from 'fs/promises'
+import bcrypt from 'bcryptjs'
+import QRCode from 'qrcode'
 import assetData from '../../lib/asset-data.json'
 
 // Force Node.js runtime (Buffer / filesystem) rather than edge
@@ -306,6 +308,21 @@ async function getSession(request, db) {
   } catch { return null }
 }
 
+// Extract a YouTube video id from many URL formats
+function extractYouTubeId(url) {
+  if (!url || typeof url !== 'string') return null
+  const patterns = [
+    /(?:youtube\.com\/watch\?(?:.*&)?v=)([A-Za-z0-9_-]{11})/,
+    /(?:youtu\.be\/)([A-Za-z0-9_-]{11})/,
+    /(?:youtube\.com\/embed\/)([A-Za-z0-9_-]{11})/,
+    /(?:youtube\.com\/shorts\/)([A-Za-z0-9_-]{11})/,
+    /(?:youtube\.com\/live\/)([A-Za-z0-9_-]{11})/,
+  ]
+  for (const re of patterns) { const m = url.match(re); if (m) return m[1] }
+  if (/^[A-Za-z0-9_-]{11}$/.test(url.trim())) return url.trim()
+  return null
+}
+
 async function storeImageAsset(db, id, imageBase64, contentType, prefix = 'ig') {
   const ct = contentType || 'image/jpeg'
   const ext = (ct.split('/')[1] || 'jpg').replace('jpeg', 'jpg')
@@ -448,6 +465,13 @@ async function handleRoute(request, { params }) {
         return handleCORS(NextResponse.json({ reactions: exists.reactions || 1 }))
       }
       return handleCORS(NextResponse.json({ reactions: (doc.reactions != null ? doc.reactions : 1) }))
+    }
+
+    // ---------- Media / YouTube videos (public) ----------
+    if (route === '/media' && method === 'GET') {
+      const vids = await db.collection('media').find({}).toArray()
+      vids.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
+      return handleCORS(NextResponse.json(clean(vids)))
     }
 
     // ---------- Admin: login ----------
@@ -594,6 +618,31 @@ async function handleRoute(request, { params }) {
         const body = await request.json().catch(() => ({}))
         await db.collection('stories').updateOne({ id: path[2] }, { $set: { featured: !!body.featured } })
         return handleCORS(NextResponse.json({ ok: true, featured: !!body.featured }))
+      }
+
+      // Add a Media / YouTube video
+      if (route === '/admin/media' && method === 'POST') {
+        const body = await request.json()
+        const vid = extractYouTubeId(body.youtubeUrl)
+        if (!vid) return handleCORS(NextResponse.json({ error: 'Please enter a valid YouTube link' }, { status: 400 }))
+        const id = uuidv4()
+        const doc = {
+          id,
+          title: (body.title || '').slice(0, 120) || 'Untitled',
+          youtubeUrl: body.youtubeUrl,
+          videoId: vid,
+          thumbnail: `https://img.youtube.com/vi/${vid}/hqdefault.jpg`,
+          createdAt: new Date(),
+        }
+        await db.collection('media').insertOne(doc)
+        const { _id, ...rest } = doc
+        return handleCORS(NextResponse.json(rest))
+      }
+
+      // Delete a Media video
+      if (path[1] === 'media' && path[2] && method === 'DELETE') {
+        await db.collection('media').deleteOne({ id: path[2] })
+        return handleCORS(NextResponse.json({ ok: true }))
       }
 
       // Delete Story

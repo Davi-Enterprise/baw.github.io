@@ -1071,15 +1071,29 @@ const WrestlerDetail = ({ w, data, nav, onOpenWrestler }) => {
 
 /* ============================= MEDIA PAGE ============================= */
 const MediaPage = ({ data }) => {
-  const [tab, setTab] = useState('photos')
+  const [tab, setTab] = useState('videos')
+  const [playing, setPlaying] = useState(null)
   const photos = [HERO_SLIDES[0].img, HERO_SLIDES[1].img, HERO_SLIDES[2].img, ...data.wrestlers.map((w) => w.image)]
+  const videos = data.media || []
   return (
     <div>
       <PageBanner overline="The Archive" title="MEDIA" img={HERO_SLIDES[1].img} />
+      {/* YouTube player modal */}
+      <AnimatePresence>
+        {playing && (
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[95] bg-black/95 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setPlaying(null)}>
+            <button onClick={() => setPlaying(null)} className="absolute top-5 right-5 z-10 text-white/80 hover:text-white"><X size={30} /></button>
+            <div className="w-full max-w-4xl aspect-video rounded-xl overflow-hidden glow border border-white/10" onClick={(e) => e.stopPropagation()}>
+              <iframe className="w-full h-full" src={`https://www.youtube.com/embed/${playing}?autoplay=1&rel=0`} title="YouTube video" frameBorder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowFullScreen />
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
       <section className="py-16">
         <div className="container mx-auto px-5">
           <div className="flex justify-center gap-2 mb-12">
-            {[{ k: 'photos', l: 'Photo Gallery' }, { k: 'videos', l: 'Video Highlights' }, { k: 'bts', l: 'Behind The Scenes' }].map((t) => (
+            {[{ k: 'videos', l: 'Video Highlights' }, { k: 'photos', l: 'Photo Gallery' }, { k: 'bts', l: 'Behind The Scenes' }].map((t) => (
               <button key={t.k} onClick={() => setTab(t.k)}
                 className={`px-6 py-2.5 rounded-full font-oswald uppercase tracking-widest text-xs transition-all ${tab === t.k ? 'bg-gradient-to-r from-[#6A0DAD] to-[#8A2BE2] text-white glow' : 'glass text-[#BDBDBD] hover:text-white'}`}>
                 {t.l}
@@ -1087,11 +1101,27 @@ const MediaPage = ({ data }) => {
             ))}
           </div>
           {tab === 'videos' ? (
-            <div className="grid md:grid-cols-2 gap-6">
-              {[HERO_SLIDES[0].img, HERO_SLIDES[2].img, data.wrestlers[0]?.image, data.wrestlers[3]?.image].map((im, i) => (
-                <VideoThumb key={i} img={im || HERO_SLIDES[0].img} label={['Main Event Recap', 'Championship Moments', 'Superstar Spotlight', 'Best Of BAW'][i]} />
-              ))}
-            </div>
+            videos.length > 0 ? (
+              <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
+                {videos.map((v, i) => (
+                  <motion.button key={v.id} variants={reveal} custom={i % 6} initial="hidden" whileInView="show" viewport={{ once: true }}
+                    onClick={() => setPlaying(v.videoId)} className="group text-left rounded-xl overflow-hidden glass hover:border-[#8A2BE2] transition-colors">
+                    <div className="relative aspect-video overflow-hidden">
+                      <img src={v.thumbnail} alt={v.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
+                      <div className="absolute inset-0 bg-black/30 group-hover:bg-black/50 flex items-center justify-center transition-colors">
+                        <div className="w-16 h-16 rounded-full bg-gradient-to-br from-[#6A0DAD] to-[#8A2BE2] flex items-center justify-center glow group-hover:scale-110 transition-transform"><Play size={26} className="text-white ml-1" /></div>
+                      </div>
+                    </div>
+                    <div className="p-4 font-oswald uppercase tracking-widest text-sm text-white truncate">{v.title}</div>
+                  </motion.button>
+                ))}
+              </div>
+            ) : (
+              <div className="text-center py-16 text-[#BDBDBD] font-poppins">
+                <Youtube size={40} className="mx-auto mb-4 text-[#8A2BE2]" />
+                No videos yet — check back soon for match highlights and recaps.
+              </div>
+            )
           ) : (
             <div className="columns-2 md:columns-3 gap-4 space-y-4">
               {(tab === 'bts' ? [...photos].reverse() : photos).map((img, i) => (
@@ -1620,6 +1650,10 @@ const AdminPage = ({ onDataChange }) => {
   const [loginErr, setLoginErr] = useState('')
   const [posts, setPosts] = useState([])
   const [stories, setStories] = useState([])
+  const [media, setMedia] = useState([])
+  const [mTitle, setMTitle] = useState('')
+  const [mUrl, setMUrl] = useState('')
+  const [mBusy, setMBusy] = useState(false)
   const [caption, setCaption] = useState('')
   const [link, setLink] = useState('')
   const [imgData, setImgData] = useState(null)
@@ -1638,13 +1672,31 @@ const AdminPage = ({ onDataChange }) => {
 
   const loadLists = async (tok = token) => {
     try {
-      const [p, s] = await Promise.all([
+      const [p, s, m] = await Promise.all([
         fetch('/api/instagram').then((r) => r.json()),
         fetch('/api/admin/stories', { headers: adminHeaders(tok, false) }).then((r) => r.json()),
+        fetch('/api/media').then((r) => r.json()),
       ])
       setPosts(Array.isArray(p) ? p : [])
       setStories(Array.isArray(s) ? s : [])
+      setMedia(Array.isArray(m) ? m : [])
     } catch {}
+  }
+
+  const addMedia = async (e) => {
+    e.preventDefault()
+    if (!mUrl.trim()) { flash('Paste a YouTube link first.'); return }
+    setMBusy(true)
+    try {
+      const r = await fetch('/api/admin/media', { method: 'POST', headers: adminHeaders(token), body: JSON.stringify({ title: mTitle, youtubeUrl: mUrl }) })
+      const d = await r.json()
+      if (r.ok) { setMTitle(''); setMUrl(''); flash('Video added!'); await loadLists(); onDataChange?.() }
+      else flash(d.error || 'Failed to add video')
+    } finally { setMBusy(false) }
+  }
+  const delMedia = async (id) => {
+    await fetch(`/api/admin/media/${id}`, { method: 'DELETE', headers: adminHeaders(token, false) })
+    await loadLists(); onDataChange?.()
   }
 
   useEffect(() => {
@@ -1878,6 +1930,39 @@ const AdminPage = ({ onDataChange }) => {
               </GlowButton>
             </form>
           </div>
+
+          {/* Media / YouTube */}
+          <div className="glass rounded-2xl p-6">
+            <h2 className="font-bebas text-3xl mb-4 flex items-center gap-2"><Youtube size={22} className="text-[#B15EFF]" /> MEDIA / YOUTUBE</h2>
+            <form onSubmit={addMedia} className="space-y-4">
+              <div>
+                <label className="text-xs font-oswald uppercase tracking-widest text-[#BDBDBD]">Video Title</label>
+                <Input value={mTitle} onChange={(e) => setMTitle(e.target.value)} placeholder="e.g. Inaugural Show Highlights" className="bg-white/5 border-white/10 h-11 mt-1 text-white placeholder:text-[#BDBDBD]/60" />
+              </div>
+              <div>
+                <label className="text-xs font-oswald uppercase tracking-widest text-[#BDBDBD]">YouTube Link</label>
+                <Input value={mUrl} onChange={(e) => setMUrl(e.target.value)} placeholder="https://youtu.be/... or https://youtube.com/watch?v=..." className="bg-white/5 border-white/10 h-11 mt-1 text-white placeholder:text-[#BDBDBD]/60" />
+                <p className="text-[11px] text-[#BDBDBD]/70 font-poppins mt-1">Paste any YouTube link — it will auto-embed and play on the Media page.</p>
+              </div>
+              <GlowButton type="submit" full className={mBusy ? 'opacity-70 pointer-events-none' : ''}>
+                {mBusy ? <Loader2 size={16} className="animate-spin" /> : <Plus size={16} />} Add Video
+              </GlowButton>
+            </form>
+            <div className="mt-5">
+              <h3 className="font-bebas text-2xl mb-3">VIDEOS ({media.length})</h3>
+              {media.length === 0 ? <p className="text-[#BDBDBD] font-poppins text-sm">No videos yet.</p> : (
+                <div className="space-y-3 max-h-[260px] overflow-y-auto hide-scroll">
+                  {media.map((v) => (
+                    <div key={v.id} className="flex items-center gap-3 glass rounded-xl p-3">
+                      <img src={v.thumbnail} alt="" className="w-20 h-12 rounded object-cover shrink-0" />
+                      <div className="flex-1 min-w-0 text-sm font-poppins text-[#E8E8E8] truncate">{v.title}</div>
+                      <button onClick={() => delMedia(v.id)} className="text-[#BDBDBD] hover:text-red-400 shrink-0"><Trash2 size={16} /></button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -1890,7 +1975,7 @@ export default function App() {
   const [route, setRoute] = useState({ page: 'home', id: null })
   const [scrolled, setScrolled] = useState(false)
   const [showTop, setShowTop] = useState(false)
-  const [data, setData] = useState({ events: [], wrestlers: [], news: [], instagram: [], stories: [] })
+  const [data, setData] = useState({ events: [], wrestlers: [], news: [], instagram: [], stories: [], media: [] })
   const [selectedEvent, setSelectedEvent] = useState(null)
   const { scrollY } = useScroll()
 
@@ -1898,12 +1983,13 @@ export default function App() {
 
   const loadData = async () => {
     try {
-      const [e, w, n, ig, st] = await Promise.all([
+      const [e, w, n, ig, st, md] = await Promise.all([
         fetch('/api/events').then((r) => r.json()),
         fetch('/api/wrestlers').then((r) => r.json()),
         fetch('/api/news').then((r) => r.json()),
         fetch('/api/instagram').then((r) => r.json()),
         fetch('/api/stories').then((r) => r.json()),
+        fetch('/api/media').then((r) => r.json()),
       ])
       setData({
         events: Array.isArray(e) ? e : [],
@@ -1911,6 +1997,7 @@ export default function App() {
         news: Array.isArray(n) ? n : [],
         instagram: Array.isArray(ig) ? ig : [],
         stories: Array.isArray(st) ? st : [],
+        media: Array.isArray(md) ? md : [],
       })
     } catch (err) { console.error(err) }
   }
