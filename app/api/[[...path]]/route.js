@@ -699,6 +699,56 @@ async function handleRoute(request, { params }) {
         return handleCORS(NextResponse.json(rest))
       }
 
+      // ---------- Admin: Roster / Wrestlers CRUD ----------
+      // Create a new wrestler
+      if (route === '/admin/wrestlers' && method === 'POST') {
+        const body = await request.json()
+        const name = String(body.name || '').trim()
+        if (!name) return handleCORS(NextResponse.json({ error: 'Name is required' }, { status: 400 }))
+        const id = uuidv4()
+        let image = ''
+        if (body.imageBase64) image = await storeImageAsset(db, id, body.imageBase64, body.contentType, 'wr')
+        else if (body.imageUrl) image = body.imageUrl
+        const doc = {
+          id, name: name.toUpperCase(),
+          nickname: String(body.nickname || '').trim(),
+          bio: String(body.bio || '').trim(),
+          category: 'men', champion: false,
+          image: image || '/api/asset/logo-t.png',
+          showName: false, createdAt: new Date(),
+        }
+        await db.collection('wrestlers').insertOne(doc)
+        const { _id, ...rest } = doc
+        return handleCORS(NextResponse.json(rest))
+      }
+
+      // Update an existing wrestler (works on seeded wrestlers too)
+      if (path[1] === 'wrestlers' && path[2] && method === 'PUT') {
+        const body = await request.json()
+        const wid = path[2]
+        const existing = await db.collection('wrestlers').findOne({ id: wid })
+        if (!existing) return handleCORS(NextResponse.json({ error: 'Wrestler not found' }, { status: 404 }))
+        const set = {}
+        if (typeof body.name === 'string' && body.name.trim()) set.name = body.name.trim().toUpperCase()
+        if (typeof body.nickname === 'string') set.nickname = body.nickname.trim()
+        if (typeof body.bio === 'string') set.bio = body.bio.trim()
+        if (body.imageBase64) set.image = await storeImageAsset(db, wid, body.imageBase64, body.contentType, 'wr')
+        else if (typeof body.imageUrl === 'string' && body.imageUrl.trim()) set.image = body.imageUrl.trim()
+        await db.collection('wrestlers').updateOne({ id: wid }, { $set: set })
+        const updated = await db.collection('wrestlers').findOne({ id: wid })
+        const { _id, ...rest } = updated
+        return handleCORS(NextResponse.json(rest))
+      }
+
+      // Delete a wrestler
+      if (path[1] === 'wrestlers' && path[2] && method === 'DELETE') {
+        const wid = path[2]
+        await db.collection('wrestlers').deleteOne({ id: wid })
+        // best-effort remove any uploaded wr- asset for this wrestler
+        await db.collection('assets').deleteMany({ filename: { $regex: `^wr-${wid}\\.` } })
+        return handleCORS(NextResponse.json({ ok: true }))
+      }
+
       // Create a Story directly (no Instagram post needed)
       if (route === '/admin/stories' && method === 'POST') {
         const body = await request.json()

@@ -1741,6 +1741,15 @@ const AdminPage = ({ onDataChange, events = [] }) => {
   const [stories, setStories] = useState([])
   const [media, setMedia] = useState([])
   const [vault, setVault] = useState([])
+  // Roster manager
+  const [wrestlers, setWrestlers] = useState([])
+  const [wName, setWName] = useState('')
+  const [wNick, setWNick] = useState('')
+  const [wBio, setWBio] = useState('')
+  const [wImg, setWImg] = useState(null)
+  const [wEditId, setWEditId] = useState(null)
+  const [wBusy, setWBusy] = useState(false)
+  const wFileRef = useRef(null)
   const [mTitle, setMTitle] = useState('')
   const [mUrl, setMUrl] = useState('')
   const [mType, setMType] = useState('video')
@@ -1783,13 +1792,14 @@ const AdminPage = ({ onDataChange, events = [] }) => {
 
   const loadLists = async (tok = token) => {
     try {
-      const [p, s, m, v, pr, st] = await Promise.all([
+      const [p, s, m, v, pr, st, wr] = await Promise.all([
         fetch('/api/instagram').then((r) => r.json()),
         fetch('/api/admin/stories', { headers: adminHeaders(tok, false) }).then((r) => r.json()),
         fetch('/api/media').then((r) => r.json()),
         fetch('/api/admin/locked-media', { headers: adminHeaders(tok, false) }).then((r) => r.json()),
         fetch('/api/admin/promos', { headers: adminHeaders(tok, false) }).then((r) => r.json()),
         fetch('/api/admin/settings', { headers: adminHeaders(tok, false) }).then((r) => r.json()),
+        fetch('/api/wrestlers').then((r) => r.json()),
       ])
       setPosts(Array.isArray(p) ? p : [])
       setStories(Array.isArray(s) ? s : [])
@@ -1797,7 +1807,40 @@ const AdminPage = ({ onDataChange, events = [] }) => {
       setVault(Array.isArray(v) ? v : [])
       setPromos(Array.isArray(pr) ? pr : [])
       setTicketLimit(st && st.ticketLimitPerOrder ? String(st.ticketLimitPerOrder) : '0')
+      setWrestlers(Array.isArray(wr) ? wr : [])
     } catch {}
+  }
+
+  const onWImg = async (e) => {
+    const file = e.target.files?.[0]; if (!file) return
+    try { const res = await fileToResizedBase64(file); setWImg(res) } catch { flash('Could not read image') }
+  }
+  const resetWrestlerForm = () => { setWEditId(null); setWName(''); setWNick(''); setWBio(''); setWImg(null); if (wFileRef.current) wFileRef.current.value = '' }
+  const startEditWrestler = (w) => {
+    setWEditId(w.id); setWName(w.name || ''); setWNick(w.nickname || ''); setWBio(w.bio || '')
+    setWImg(w.image ? { preview: w.image, base64: null } : null)
+    try { window.scrollTo({ top: 0, behavior: 'smooth' }) } catch {}
+  }
+  const saveWrestler = async (e) => {
+    e.preventDefault()
+    if (!wName.trim()) { flash('Enter a name.'); return }
+    setWBusy(true)
+    try {
+      const payload = { name: wName, nickname: wNick, bio: wBio }
+      if (wImg && wImg.base64) { payload.imageBase64 = wImg.base64; payload.contentType = wImg.contentType }
+      let r
+      if (wEditId) r = await fetch(`/api/admin/wrestlers/${wEditId}`, { method: 'PUT', headers: adminHeaders(token), body: JSON.stringify(payload) })
+      else r = await fetch('/api/admin/wrestlers', { method: 'POST', headers: adminHeaders(token), body: JSON.stringify(payload) })
+      const d = await r.json()
+      if (r.ok) { flash(wEditId ? 'Wrestler updated!' : 'Wrestler added!'); resetWrestlerForm(); await loadLists() }
+      else flash(d.error || 'Failed to save wrestler')
+    } finally { setWBusy(false) }
+  }
+  const delWrestler = async (id, name) => {
+    if (!window.confirm(`Remove ${name} from the roster? This cannot be undone.`)) return
+    await fetch(`/api/admin/wrestlers/${id}`, { method: 'DELETE', headers: adminHeaders(token, false) })
+    if (wEditId === id) resetWrestlerForm()
+    await loadLists()
   }
 
   const addPromo = async (e) => {
@@ -2005,6 +2048,63 @@ const AdminPage = ({ onDataChange, events = [] }) => {
         {msg && <div className="mb-6 glass rounded-lg p-3 text-[#B15EFF] font-poppins text-sm inline-flex items-center gap-2"><Check size={16} /> {msg}</div>}
 
         <div className="grid lg:grid-cols-2 gap-8">
+          {/* Roster manager (full width) */}
+          <div className="glass rounded-2xl p-6 lg:col-span-2">
+            <h2 className="font-bebas text-3xl mb-4 flex items-center gap-2"><Users size={22} className="text-[#B15EFF]" /> ROSTER MANAGER</h2>
+            <div className="grid md:grid-cols-2 gap-6">
+              {/* form */}
+              <form onSubmit={saveWrestler} className="space-y-4">
+                <div className="font-oswald uppercase tracking-widest text-xs text-[#B15EFF]">{wEditId ? 'Edit Wrestler' : 'Add New Wrestler'}</div>
+                <div>
+                  <label className="text-xs font-oswald uppercase tracking-widest text-[#BDBDBD]">Name *</label>
+                  <Input value={wName} onChange={(e) => setWName(e.target.value)} placeholder="e.g. TJ SLATER" className="bg-white/5 border-white/10 h-11 mt-1 text-white placeholder:text-[#BDBDBD]/60" />
+                </div>
+                <div>
+                  <label className="text-xs font-oswald uppercase tracking-widest text-[#BDBDBD]">Nickname (optional)</label>
+                  <Input value={wNick} onChange={(e) => setWNick(e.target.value)} placeholder="e.g. The Last Dragon" className="bg-white/5 border-white/10 h-11 mt-1 text-white placeholder:text-[#BDBDBD]/60" />
+                </div>
+                <div>
+                  <label className="text-xs font-oswald uppercase tracking-widest text-[#BDBDBD]">Description / Bio (optional)</label>
+                  <Textarea value={wBio} onChange={(e) => setWBio(e.target.value)} placeholder="Short description shown on the wrestler's page..." rows={4} className="bg-white/5 border-white/10 mt-1 text-white placeholder:text-[#BDBDBD]/60" />
+                </div>
+                <div>
+                  <label className="text-xs font-oswald uppercase tracking-widest text-[#BDBDBD]">Photo {wEditId ? '(leave to keep current)' : ''}</label>
+                  <input ref={wFileRef} type="file" accept="image/*" onChange={onWImg} className="hidden" />
+                  <button type="button" onClick={() => wFileRef.current?.click()} className="mt-1 w-full flex items-center gap-3 glass rounded-lg p-3 hover:bg-white/5">
+                    {wImg?.preview ? <img src={wImg.preview} alt="preview" className="w-16 h-16 rounded-lg object-cover" /> : <div className="w-16 h-16 rounded-lg bg-white/5 flex items-center justify-center"><Upload size={20} className="text-[#BDBDBD]" /></div>}
+                    <span className="text-sm text-[#BDBDBD] font-poppins">{wImg ? 'Image selected — tap to change' : 'Tap to upload a poster/photo'}</span>
+                  </button>
+                </div>
+                <div className="flex gap-2">
+                  <GlowButton type="submit" full className={wBusy ? 'opacity-70 pointer-events-none' : ''}>
+                    {wBusy ? <Loader2 size={16} className="animate-spin" /> : (wEditId ? <Check size={16} /> : <Plus size={16} />)} {wEditId ? 'Save Changes' : 'Add Wrestler'}
+                  </GlowButton>
+                  {wEditId && <GlowButton type="button" variant="outline" onClick={resetWrestlerForm} className="shrink-0">Cancel</GlowButton>}
+                </div>
+              </form>
+              {/* list */}
+              <div>
+                <div className="font-oswald uppercase tracking-widest text-xs text-[#B15EFF] mb-3">Current Roster ({wrestlers.length})</div>
+                {wrestlers.length === 0 ? <p className="text-[#BDBDBD] font-poppins text-sm">No wrestlers yet.</p> : (
+                  <div className="space-y-3 max-h-[520px] overflow-y-auto hide-scroll pr-1">
+                    {wrestlers.map((w) => (
+                      <div key={w.id} className={`flex items-center gap-3 glass rounded-xl p-3 ${wEditId === w.id ? 'ring-1 ring-[#8A2BE2]' : ''}`}>
+                        <img src={w.image} alt={w.name} className="w-14 h-14 rounded-lg object-cover shrink-0" />
+                        <div className="flex-1 min-w-0">
+                          <div className="font-oswald uppercase tracking-wide text-sm text-white truncate">{w.name}</div>
+                          {w.nickname ? <div className="text-[11px] text-[#B15EFF] font-poppins truncate">"{w.nickname}"</div> : null}
+                          {w.bio ? <div className="text-[11px] text-[#BDBDBD] font-poppins line-clamp-2">{w.bio}</div> : <div className="text-[11px] text-[#BDBDBD]/50 font-poppins italic">No description</div>}
+                        </div>
+                        <button onClick={() => startEditWrestler(w)} title="Edit" className="px-3 py-2 rounded-md bg-white/10 text-white text-xs font-oswald uppercase tracking-widest shrink-0 hover:bg-white/20">Edit</button>
+                        <button onClick={() => delWrestler(w.id, w.name)} title="Remove" className="text-[#BDBDBD] hover:text-red-400 shrink-0"><Trash2 size={16} /></button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+
           {/* Add post */}
           <div className="glass rounded-2xl p-6">
             <h2 className="font-bebas text-3xl mb-4 flex items-center gap-2"><Instagram size={22} className="text-[#B15EFF]" /> ADD INSTAGRAM POST</h2>

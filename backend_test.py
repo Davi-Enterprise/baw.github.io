@@ -1,34 +1,45 @@
 #!/usr/bin/env python3
 """
-Backend API tests for Black Amethyst Wrestling - Promo Code Expiry Feature
-Tests the new expiry date functionality for promo codes
+Backend test for Admin Roster CRUD endpoints
+Black Amethyst Wrestling - Admin Wrestler Management
 """
-
 import requests
 import json
+import base64
 import sys
-from datetime import datetime, timedelta
 
-# Configuration
+# Base URL from environment
 BASE_URL = "https://baw-elite.preview.emergentagent.com/api"
 ADMIN_PASSWORD = "@Bubba2021"
 
-# Test state
-admin_token = None
-created_promo_ids = []
+# 1x1 pixel transparent PNG in base64 (tiny valid image for testing)
+TINY_PNG_BASE64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
 
-def log_test(test_name, passed, details=""):
+# Test results tracking
+test_results = {
+    "passed": 0,
+    "failed": 0,
+    "scenarios": []
+}
+
+def log_test(scenario, passed, message):
     """Log test result"""
     status = "✅ PASS" if passed else "❌ FAIL"
-    print(f"{status}: {test_name}")
-    if details:
-        print(f"  Details: {details}")
-    return passed
+    print(f"{status}: {scenario} - {message}")
+    test_results["scenarios"].append({
+        "scenario": scenario,
+        "passed": passed,
+        "message": message
+    })
+    if passed:
+        test_results["passed"] += 1
+    else:
+        test_results["failed"] += 1
 
-def admin_login():
-    """Login as admin and get token"""
-    global admin_token
+def get_admin_token():
+    """Get admin token via login"""
     try:
+        print("\n=== Getting Admin Token ===")
         response = requests.post(
             f"{BASE_URL}/admin/login",
             json={"password": ADMIN_PASSWORD},
@@ -36,350 +47,481 @@ def admin_login():
         )
         if response.status_code == 200:
             data = response.json()
-            admin_token = data.get("token")
-            return log_test("Admin login", True, f"Token obtained")
+            token = data.get("token")
+            print(f"✅ Admin login successful, token: {token[:20]}...")
+            return token
         else:
-            return log_test("Admin login", False, f"Status {response.status_code}: {response.text}")
+            print(f"❌ Admin login failed: {response.status_code} - {response.text}")
+            return None
     except Exception as e:
-        return log_test("Admin login", False, f"Exception: {str(e)}")
+        print(f"❌ Exception during admin login: {e}")
+        return None
 
-def create_promo(code, promo_type, value, expires_at=None):
-    """Create a promo code"""
+def test_scenario_1_auth(token):
+    """SCENARIO 1: AUTH - Test endpoints without Authorization header"""
+    print("\n=== SCENARIO 1: AUTH TESTS ===")
+    
+    # Test POST without token
     try:
-        payload = {
-            "code": code,
-            "type": promo_type,
-            "value": value
-        }
-        if expires_at is not None:
-            payload["expiresAt"] = expires_at
-        
         response = requests.post(
-            f"{BASE_URL}/admin/promos",
-            headers={"Authorization": f"Bearer {admin_token}"},
-            json=payload,
+            f"{BASE_URL}/admin/wrestlers",
+            json={"name": "Test Wrestler"},
+            timeout=10
+        )
+        if response.status_code == 401:
+            log_test("1a. POST /admin/wrestlers without token", True, f"Correctly returned 401")
+        else:
+            log_test("1a. POST /admin/wrestlers without token", False, f"Expected 401, got {response.status_code}")
+    except Exception as e:
+        log_test("1a. POST /admin/wrestlers without token", False, f"Exception: {e}")
+    
+    # Test PUT without token
+    try:
+        response = requests.put(
+            f"{BASE_URL}/admin/wrestlers/tj-slater",
+            json={"bio": "test"},
+            timeout=10
+        )
+        if response.status_code == 401:
+            log_test("1b. PUT /admin/wrestlers/:id without token", True, f"Correctly returned 401")
+        else:
+            log_test("1b. PUT /admin/wrestlers/:id without token", False, f"Expected 401, got {response.status_code}")
+    except Exception as e:
+        log_test("1b. PUT /admin/wrestlers/:id without token", False, f"Exception: {e}")
+    
+    # Test DELETE without token
+    try:
+        response = requests.delete(
+            f"{BASE_URL}/admin/wrestlers/tj-slater",
+            timeout=10
+        )
+        if response.status_code == 401:
+            log_test("1c. DELETE /admin/wrestlers/:id without token", True, f"Correctly returned 401")
+        else:
+            log_test("1c. DELETE /admin/wrestlers/:id without token", False, f"Expected 401, got {response.status_code}")
+    except Exception as e:
+        log_test("1c. DELETE /admin/wrestlers/:id without token", False, f"Exception: {e}")
+
+def test_scenario_2_validation(token):
+    """SCENARIO 2: VALIDATION - Test POST with missing required field (name)"""
+    print("\n=== SCENARIO 2: VALIDATION TESTS ===")
+    
+    try:
+        response = requests.post(
+            f"{BASE_URL}/admin/wrestlers",
+            json={"nickname": "x"},
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=10
+        )
+        if response.status_code == 400:
+            data = response.json()
+            error = data.get("error", "")
+            if "name" in error.lower() or "required" in error.lower():
+                log_test("2. POST without name field", True, f"Correctly returned 400 with error: {error}")
+            else:
+                log_test("2. POST without name field", False, f"Got 400 but error message unclear: {error}")
+        else:
+            log_test("2. POST without name field", False, f"Expected 400, got {response.status_code}")
+    except Exception as e:
+        log_test("2. POST without name field", False, f"Exception: {e}")
+
+def test_scenario_3_create(token):
+    """SCENARIO 3: CREATE - Create a new wrestler with full data"""
+    print("\n=== SCENARIO 3: CREATE WRESTLER ===")
+    
+    created_id = None
+    
+    try:
+        # Create wrestler
+        response = requests.post(
+            f"{BASE_URL}/admin/wrestlers",
+            json={
+                "name": "Test Grappler",
+                "nickname": "The Tester",
+                "bio": "A test wrestler bio.",
+                "imageBase64": TINY_PNG_BASE64,
+                "contentType": "image/png"
+            },
+            headers={"Authorization": f"Bearer {token}"},
             timeout=10
         )
         
         if response.status_code == 200:
             data = response.json()
-            promo_id = data.get("id")
-            if promo_id:
-                created_promo_ids.append(promo_id)
-            return True, data
-        else:
-            return False, response.text
-    except Exception as e:
-        return False, str(e)
-
-def validate_promo(code, items):
-    """Validate a promo code"""
-    try:
-        response = requests.post(
-            f"{BASE_URL}/promo/validate",
-            json={"code": code, "items": items},
-            timeout=10
-        )
-        return response.status_code, response.json()
-    except Exception as e:
-        return None, str(e)
-
-def create_order(items, email, promo_code=None):
-    """Create a PayPal order"""
-    try:
-        payload = {
-            "items": items,
-            "email": email
-        }
-        if promo_code:
-            payload["promoCode"] = promo_code
-        
-        response = requests.post(
-            f"{BASE_URL}/paypal/create-order",
-            json=payload,
-            timeout=10
-        )
-        return response.status_code, response.json()
-    except Exception as e:
-        return None, str(e)
-
-def get_all_promos():
-    """Get all promo codes"""
-    try:
-        response = requests.get(
-            f"{BASE_URL}/admin/promos",
-            headers={"Authorization": f"Bearer {admin_token}"},
-            timeout=10
-        )
-        if response.status_code == 200:
-            return True, response.json()
-        else:
-            return False, response.text
-    except Exception as e:
-        return False, str(e)
-
-def delete_promo(promo_id):
-    """Delete a promo code"""
-    try:
-        response = requests.delete(
-            f"{BASE_URL}/admin/promos/{promo_id}",
-            headers={"Authorization": f"Bearer {admin_token}"},
-            timeout=10
-        )
-        return response.status_code == 200
-    except Exception as e:
-        return False
-
-def cleanup():
-    """Delete all created promo codes"""
-    print("\n=== CLEANUP ===")
-    success_count = 0
-    for promo_id in created_promo_ids:
-        if delete_promo(promo_id):
-            success_count += 1
-    
-    log_test(f"Cleanup: Deleted {success_count}/{len(created_promo_ids)} test promos", 
-             success_count == len(created_promo_ids))
-
-def run_tests():
-    """Run all promo code expiry tests"""
-    print("=" * 80)
-    print("PROMO CODE EXPIRY DATE FEATURE - BACKEND TESTS")
-    print("=" * 80)
-    
-    test_results = []
-    
-    # Login as admin
-    print("\n=== SETUP ===")
-    if not admin_login():
-        print("❌ Cannot proceed without admin token")
-        return False
-    
-    # Test items for validation
-    test_items = [{"tier": "General Admission", "qty": 1}]
-    
-    # SCENARIO 1: Create promo with FUTURE expiry
-    print("\n=== SCENARIO 1: Create promo with FUTURE expiry ===")
-    future_date = (datetime.now() + timedelta(days=365)).strftime("%Y-%m-%d")
-    success, result = create_promo("EXPFUTURE", "percent", 20, future_date)
-    
-    if success:
-        has_expires_at = result.get("expiresAt") is not None
-        test_results.append(log_test(
-            "Create EXPFUTURE promo with future expiry",
-            has_expires_at,
-            f"expiresAt: {result.get('expiresAt')}"
-        ))
-    else:
-        test_results.append(log_test("Create EXPFUTURE promo", False, result))
-    
-    # SCENARIO 2: Validate future-dated promo (should be valid)
-    print("\n=== SCENARIO 2: Validate future-dated promo ===")
-    status, data = validate_promo("EXPFUTURE", test_items)
-    
-    if status == 200:
-        is_valid = data.get("valid") == True
-        has_discount = data.get("discount") == 4  # 20% off $20 = $4
-        has_total = data.get("total") == 16  # $20 - $4 = $16
-        
-        test_results.append(log_test(
-            "Validate EXPFUTURE - valid:true",
-            is_valid,
-            f"valid={data.get('valid')}"
-        ))
-        test_results.append(log_test(
-            "Validate EXPFUTURE - discount:4",
-            has_discount,
-            f"discount={data.get('discount')}"
-        ))
-        test_results.append(log_test(
-            "Validate EXPFUTURE - total:16",
-            has_total,
-            f"total={data.get('total')}"
-        ))
-    else:
-        test_results.append(log_test("Validate EXPFUTURE", False, f"Status {status}: {data}"))
-    
-    # SCENARIO 3: Create promo with PAST expiry
-    print("\n=== SCENARIO 3: Create promo with PAST expiry ===")
-    past_date = "2020-01-01"
-    success, result = create_promo("EXPPAST", "percent", 20, past_date)
-    
-    if success:
-        test_results.append(log_test(
-            "Create EXPPAST promo with past expiry",
-            True,
-            f"expiresAt: {result.get('expiresAt')}"
-        ))
-    else:
-        test_results.append(log_test("Create EXPPAST promo", False, result))
-    
-    # SCENARIO 4: Validate expired promo (should be invalid)
-    print("\n=== SCENARIO 4: Validate expired promo ===")
-    status, data = validate_promo("EXPPAST", test_items)
-    
-    if status == 200:
-        is_invalid = data.get("valid") == False
-        has_expired_error = "expired" in data.get("error", "").lower()
-        
-        test_results.append(log_test(
-            "Validate EXPPAST - valid:false",
-            is_invalid,
-            f"valid={data.get('valid')}"
-        ))
-        test_results.append(log_test(
-            "Validate EXPPAST - error mentions 'expired'",
-            has_expired_error,
-            f"error='{data.get('error')}'"
-        ))
-    else:
-        test_results.append(log_test("Validate EXPPAST", False, f"Status {status}: {data}"))
-    
-    # SCENARIO 5: Server-side enforcement on create-order with expired code
-    print("\n=== SCENARIO 5: Server-side enforcement on create-order ===")
-    status, data = create_order(test_items, "test@example.com", "EXPPAST")
-    
-    if status == 400:
-        has_expired_error = "expired" in data.get("error", "").lower()
-        test_results.append(log_test(
-            "create-order with EXPPAST returns 400",
-            True,
-            f"Status {status}"
-        ))
-        test_results.append(log_test(
-            "create-order error mentions 'expired'",
-            has_expired_error,
-            f"error='{data.get('error')}'"
-        ))
-    else:
-        test_results.append(log_test(
-            "create-order with EXPPAST",
-            False,
-            f"Expected 400, got {status}: {data}"
-        ))
-    
-    # SCENARIO 6: Create promo with NO expiry
-    print("\n=== SCENARIO 6: Create promo with NO expiry ===")
-    success, result = create_promo("NOEXP", "amount", 5)
-    
-    if success:
-        expires_at_is_null = result.get("expiresAt") is None
-        test_results.append(log_test(
-            "Create NOEXP promo without expiry",
-            expires_at_is_null,
-            f"expiresAt: {result.get('expiresAt')}"
-        ))
-    else:
-        test_results.append(log_test("Create NOEXP promo", False, result))
-    
-    # Validate NOEXP (should be valid)
-    status, data = validate_promo("NOEXP", test_items)
-    
-    if status == 200:
-        is_valid = data.get("valid") == True
-        has_discount = data.get("discount") == 5  # $5 off
-        
-        test_results.append(log_test(
-            "Validate NOEXP - valid:true",
-            is_valid,
-            f"valid={data.get('valid')}"
-        ))
-        test_results.append(log_test(
-            "Validate NOEXP - discount:5",
-            has_discount,
-            f"discount={data.get('discount')}"
-        ))
-    else:
-        test_results.append(log_test("Validate NOEXP", False, f"Status {status}: {data}"))
-    
-    # SCENARIO 7: Verify GET /api/admin/promos returns all promos with expiresAt
-    print("\n=== SCENARIO 7: Verify GET /api/admin/promos ===")
-    success, promos = get_all_promos()
-    
-    if success:
-        test_codes = ["EXPFUTURE", "EXPPAST", "NOEXP"]
-        found_promos = [p for p in promos if p.get("code") in test_codes]
-        
-        test_results.append(log_test(
-            "GET /admin/promos returns all created promos",
-            len(found_promos) == 3,
-            f"Found {len(found_promos)}/3 test promos"
-        ))
-        
-        # Check each promo has expiresAt field
-        for promo in found_promos:
-            code = promo.get("code")
-            has_field = "expiresAt" in promo
+            created_id = data.get("id")
+            name = data.get("name")
+            nickname = data.get("nickname")
+            bio = data.get("bio")
+            category = data.get("category")
+            champion = data.get("champion")
+            image = data.get("image")
             
-            if code == "EXPFUTURE":
-                expected = promo.get("expiresAt") is not None
-                test_results.append(log_test(
-                    f"EXPFUTURE has non-null expiresAt",
-                    expected,
-                    f"expiresAt={promo.get('expiresAt')}"
-                ))
-            elif code == "EXPPAST":
-                expected = promo.get("expiresAt") is not None
-                test_results.append(log_test(
-                    f"EXPPAST has non-null expiresAt",
-                    expected,
-                    f"expiresAt={promo.get('expiresAt')}"
-                ))
-            elif code == "NOEXP":
-                expected = promo.get("expiresAt") is None
-                test_results.append(log_test(
-                    f"NOEXP has null expiresAt",
-                    expected,
-                    f"expiresAt={promo.get('expiresAt')}"
-                ))
-    else:
-        test_results.append(log_test("GET /admin/promos", False, promos))
+            # Verify response structure
+            checks = []
+            checks.append(("id exists", created_id is not None))
+            checks.append(("name uppercased", name == "TEST GRAPPLER"))
+            checks.append(("nickname preserved", nickname == "The Tester"))
+            checks.append(("bio preserved", bio == "A test wrestler bio."))
+            checks.append(("category is men", category == "men"))
+            checks.append(("champion is false", champion == False))
+            checks.append(("image path starts with /api/asset/wr-", image and image.startswith("/api/asset/wr-")))
+            
+            all_passed = all(check[1] for check in checks)
+            failed_checks = [check[0] for check in checks if not check[1]]
+            
+            if all_passed:
+                log_test("3a. POST create wrestler", True, f"Created wrestler with id: {created_id}")
+            else:
+                log_test("3a. POST create wrestler", False, f"Failed checks: {', '.join(failed_checks)}")
+        else:
+            log_test("3a. POST create wrestler", False, f"Expected 200, got {response.status_code}: {response.text}")
+            return None
+        
+        # Verify in GET /api/wrestlers list
+        response = requests.get(f"{BASE_URL}/wrestlers", timeout=10)
+        if response.status_code == 200:
+            wrestlers = response.json()
+            count = len(wrestlers)
+            found = any(w.get("id") == created_id for w in wrestlers)
+            if count == 9 and found:
+                log_test("3b. GET /wrestlers includes new wrestler", True, f"Count is 9 (8 seeded + 1 new), new wrestler found")
+            else:
+                log_test("3b. GET /wrestlers includes new wrestler", False, f"Count: {count} (expected 9), found: {found}")
+        else:
+            log_test("3b. GET /wrestlers includes new wrestler", False, f"GET failed: {response.status_code}")
+        
+        # Verify image path returns 200
+        if created_id:
+            image_path = f"/asset/wr-{created_id}.png"
+            response = requests.get(f"{BASE_URL}{image_path}", timeout=10)
+            if response.status_code == 200:
+                content_type = response.headers.get("Content-Type", "")
+                if "image" in content_type:
+                    log_test("3c. GET image path returns 200 with image content-type", True, f"Content-Type: {content_type}")
+                else:
+                    log_test("3c. GET image path returns 200 with image content-type", False, f"Wrong Content-Type: {content_type}")
+            else:
+                log_test("3c. GET image path returns 200 with image content-type", False, f"Expected 200, got {response.status_code}")
+        
+        # Verify GET /api/wrestlers/:id detail
+        if created_id:
+            response = requests.get(f"{BASE_URL}/wrestlers/{created_id}", timeout=10)
+            if response.status_code == 200:
+                data = response.json()
+                bio = data.get("bio")
+                nickname = data.get("nickname")
+                if bio == "A test wrestler bio." and nickname == "The Tester":
+                    log_test("3d. GET /wrestlers/:id returns correct bio and nickname", True, f"Bio and nickname match")
+                else:
+                    log_test("3d. GET /wrestlers/:id returns correct bio and nickname", False, f"Bio: {bio}, Nickname: {nickname}")
+            else:
+                log_test("3d. GET /wrestlers/:id returns correct bio and nickname", False, f"Expected 200, got {response.status_code}")
+        
+        return created_id
+        
+    except Exception as e:
+        log_test("3. CREATE wrestler", False, f"Exception: {e}")
+        return None
+
+def test_scenario_4_update_created(token, wrestler_id):
+    """SCENARIO 4: UPDATE - Update the created wrestler"""
+    print("\n=== SCENARIO 4: UPDATE CREATED WRESTLER ===")
     
-    # SCENARIO 8: Regression - future-dated promo works in create-order
-    print("\n=== SCENARIO 8: Regression - future-dated promo in create-order ===")
-    status, data = create_order(test_items, "test@example.com", "EXPFUTURE")
+    if not wrestler_id:
+        log_test("4. UPDATE created wrestler", False, "No wrestler_id provided (creation failed)")
+        return
     
-    if status == 200:
-        has_order_id = "orderID" in data
-        test_results.append(log_test(
-            "create-order with EXPFUTURE returns orderID",
-            has_order_id,
-            f"orderID={data.get('orderID', 'N/A')[:20]}... (PayPal order created, NOT captured)"
-        ))
-    else:
-        test_results.append(log_test(
-            "create-order with EXPFUTURE",
-            False,
-            f"Expected 200, got {status}: {data}"
-        ))
+    try:
+        # Update bio and nickname
+        response = requests.put(
+            f"{BASE_URL}/admin/wrestlers/{wrestler_id}",
+            json={
+                "bio": "Updated bio text",
+                "nickname": "Updated Nick"
+            },
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=10
+        )
+        
+        if response.status_code == 200:
+            log_test("4a. PUT update wrestler", True, f"Update returned 200")
+        else:
+            log_test("4a. PUT update wrestler", False, f"Expected 200, got {response.status_code}")
+            return
+        
+        # Verify changes via GET
+        response = requests.get(f"{BASE_URL}/wrestlers/{wrestler_id}", timeout=10)
+        if response.status_code == 200:
+            data = response.json()
+            bio = data.get("bio")
+            nickname = data.get("nickname")
+            image = data.get("image")
+            
+            checks = []
+            checks.append(("bio updated", bio == "Updated bio text"))
+            checks.append(("nickname updated", nickname == "Updated Nick"))
+            checks.append(("image unchanged", image and image.startswith("/api/asset/wr-")))
+            
+            all_passed = all(check[1] for check in checks)
+            failed_checks = [check[0] for check in checks if not check[1]]
+            
+            if all_passed:
+                log_test("4b. GET verifies updated bio/nickname, image unchanged", True, "All fields correct")
+            else:
+                log_test("4b. GET verifies updated bio/nickname, image unchanged", False, f"Failed: {', '.join(failed_checks)}")
+        else:
+            log_test("4b. GET verifies updated bio/nickname, image unchanged", False, f"GET failed: {response.status_code}")
+            
+    except Exception as e:
+        log_test("4. UPDATE created wrestler", False, f"Exception: {e}")
+
+def test_scenario_5_update_seeded(token):
+    """SCENARIO 5: UPDATE A SEEDED WRESTLER - Update tj-slater then restore"""
+    print("\n=== SCENARIO 5: UPDATE SEEDED WRESTLER (tj-slater) ===")
     
-    # Cleanup
-    cleanup()
+    try:
+        # Update tj-slater with temp bio
+        response = requests.put(
+            f"{BASE_URL}/admin/wrestlers/tj-slater",
+            json={"bio": "TEMP TEST BIO"},
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=10
+        )
+        
+        if response.status_code == 200:
+            log_test("5a. PUT tj-slater with temp bio", True, "Update returned 200")
+        else:
+            log_test("5a. PUT tj-slater with temp bio", False, f"Expected 200, got {response.status_code}")
+            return
+        
+        # Verify temp bio
+        response = requests.get(f"{BASE_URL}/wrestlers/tj-slater", timeout=10)
+        if response.status_code == 200:
+            data = response.json()
+            bio = data.get("bio")
+            name = data.get("name")
+            
+            if bio == "TEMP TEST BIO" and name == "TJ SLATER":
+                log_test("5b. GET tj-slater shows temp bio, name unchanged", True, f"Bio: {bio}, Name: {name}")
+            else:
+                log_test("5b. GET tj-slater shows temp bio, name unchanged", False, f"Bio: {bio}, Name: {name}")
+        else:
+            log_test("5b. GET tj-slater shows temp bio, name unchanged", False, f"GET failed: {response.status_code}")
+        
+        # RESTORE: clear bio back to empty
+        response = requests.put(
+            f"{BASE_URL}/admin/wrestlers/tj-slater",
+            json={"bio": ""},
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=10
+        )
+        
+        if response.status_code == 200:
+            log_test("5c. PUT tj-slater restore bio to empty", True, "Restore returned 200")
+        else:
+            log_test("5c. PUT tj-slater restore bio to empty", False, f"Expected 200, got {response.status_code}")
+            return
+        
+        # Verify bio is now empty
+        response = requests.get(f"{BASE_URL}/wrestlers/tj-slater", timeout=10)
+        if response.status_code == 200:
+            data = response.json()
+            bio = data.get("bio", "")
+            
+            if bio == "":
+                log_test("5d. GET tj-slater bio is now empty", True, "Bio restored to empty")
+            else:
+                log_test("5d. GET tj-slater bio is now empty", False, f"Bio not empty: '{bio}'")
+        else:
+            log_test("5d. GET tj-slater bio is now empty", False, f"GET failed: {response.status_code}")
+            
+    except Exception as e:
+        log_test("5. UPDATE seeded wrestler", False, f"Exception: {e}")
+
+def test_scenario_6_put_bad_id(token):
+    """SCENARIO 6: PUT BAD ID - Update non-existent wrestler"""
+    print("\n=== SCENARIO 6: PUT BAD ID ===")
     
-    # Summary
+    try:
+        response = requests.put(
+            f"{BASE_URL}/admin/wrestlers/does-not-exist-id",
+            json={"bio": "x"},
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=10
+        )
+        
+        if response.status_code == 404:
+            log_test("6. PUT non-existent wrestler id", True, "Correctly returned 404")
+        else:
+            log_test("6. PUT non-existent wrestler id", False, f"Expected 404, got {response.status_code}")
+            
+    except Exception as e:
+        log_test("6. PUT bad id", False, f"Exception: {e}")
+
+def test_scenario_7_delete(token, wrestler_id):
+    """SCENARIO 7: DELETE - Delete the created wrestler"""
+    print("\n=== SCENARIO 7: DELETE WRESTLER ===")
+    
+    if not wrestler_id:
+        log_test("7. DELETE wrestler", False, "No wrestler_id provided (creation failed)")
+        return
+    
+    try:
+        # Delete wrestler
+        response = requests.delete(
+            f"{BASE_URL}/admin/wrestlers/{wrestler_id}",
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=10
+        )
+        
+        if response.status_code == 200:
+            log_test("7a. DELETE wrestler", True, "Delete returned 200")
+        else:
+            log_test("7a. DELETE wrestler", False, f"Expected 200, got {response.status_code}")
+            return
+        
+        # Verify not in list (count back to 8)
+        response = requests.get(f"{BASE_URL}/wrestlers", timeout=10)
+        if response.status_code == 200:
+            wrestlers = response.json()
+            count = len(wrestlers)
+            found = any(w.get("id") == wrestler_id for w in wrestlers)
+            
+            if count == 8 and not found:
+                log_test("7b. GET /wrestlers no longer includes deleted wrestler", True, f"Count back to 8, wrestler not found")
+            else:
+                log_test("7b. GET /wrestlers no longer includes deleted wrestler", False, f"Count: {count}, found: {found}")
+        else:
+            log_test("7b. GET /wrestlers no longer includes deleted wrestler", False, f"GET failed: {response.status_code}")
+        
+        # Verify GET /wrestlers/:id returns 404
+        response = requests.get(f"{BASE_URL}/wrestlers/{wrestler_id}", timeout=10)
+        if response.status_code == 404:
+            log_test("7c. GET /wrestlers/:id returns 404", True, "Correctly returned 404")
+        else:
+            log_test("7c. GET /wrestlers/:id returns 404", False, f"Expected 404, got {response.status_code}")
+            
+    except Exception as e:
+        log_test("7. DELETE wrestler", False, f"Exception: {e}")
+
+def test_scenario_8_regression(token):
+    """SCENARIO 8: REGRESSION - Verify 8 original seeded wrestlers with authentic data"""
+    print("\n=== SCENARIO 8: REGRESSION TESTS ===")
+    
+    # Expected seeded wrestlers with their original data
+    expected_wrestlers = {
+        "tj-slater": {"name": "TJ SLATER", "nickname": "", "bio": ""},
+        "arik-walker": {"name": "ARIK WALKER", "nickname": "", "bio": ""},
+        "dangelo-leflame": {"name": "D'ANGELO LE FLAME", "nickname": "", "bio": ""},
+        "alex-rey": {"name": "ALEX REY", "nickname": "", "bio": ""},
+        "big-haus": {"name": "BIG HAUS", "nickname": "", "bio": ""},
+        "draco": {"name": "DRACO", "nickname": "The Last Dragon", "bio": ""},
+        "james-derek": {"name": "JAMES DEREK", "nickname": "Da Product", "bio": ""},
+        "rakzo-moreno": {"name": "RAKZO MORENO", "nickname": "", "bio": ""}
+    }
+    
+    try:
+        response = requests.get(f"{BASE_URL}/wrestlers", timeout=10)
+        if response.status_code != 200:
+            log_test("8. REGRESSION - GET /wrestlers", False, f"GET failed: {response.status_code}")
+            return
+        
+        wrestlers = response.json()
+        count = len(wrestlers)
+        
+        # Check count
+        if count != 8:
+            log_test("8a. REGRESSION - wrestler count", False, f"Expected 8, got {count}")
+        else:
+            log_test("8a. REGRESSION - wrestler count", True, "Exactly 8 wrestlers")
+        
+        # Check all expected IDs present
+        wrestler_ids = {w.get("id") for w in wrestlers}
+        expected_ids = set(expected_wrestlers.keys())
+        
+        if wrestler_ids == expected_ids:
+            log_test("8b. REGRESSION - all original IDs present", True, "All 8 original wrestler IDs found")
+        else:
+            missing = expected_ids - wrestler_ids
+            extra = wrestler_ids - expected_ids
+            log_test("8b. REGRESSION - all original IDs present", False, f"Missing: {missing}, Extra: {extra}")
+        
+        # Check each wrestler's data
+        all_data_correct = True
+        issues = []
+        
+        for wrestler in wrestlers:
+            wid = wrestler.get("id")
+            if wid in expected_wrestlers:
+                expected = expected_wrestlers[wid]
+                name = wrestler.get("name")
+                nickname = wrestler.get("nickname", "")
+                bio = wrestler.get("bio", "")
+                
+                if name != expected["name"]:
+                    all_data_correct = False
+                    issues.append(f"{wid}: name '{name}' != '{expected['name']}'")
+                
+                if nickname != expected["nickname"]:
+                    all_data_correct = False
+                    issues.append(f"{wid}: nickname '{nickname}' != '{expected['nickname']}'")
+                
+                if bio != expected["bio"]:
+                    all_data_correct = False
+                    issues.append(f"{wid}: bio '{bio}' != '{expected['bio']}'")
+        
+        if all_data_correct:
+            log_test("8c. REGRESSION - all wrestler data authentic", True, "All names, nicknames, and bios match original seed data")
+        else:
+            log_test("8c. REGRESSION - all wrestler data authentic", False, f"Data mismatches: {'; '.join(issues)}")
+            
+    except Exception as e:
+        log_test("8. REGRESSION tests", False, f"Exception: {e}")
+
+def main():
+    """Main test execution"""
+    print("=" * 80)
+    print("BLACK AMETHYST WRESTLING - ADMIN ROSTER CRUD BACKEND TESTS")
+    print("=" * 80)
+    
+    # Get admin token
+    token = get_admin_token()
+    if not token:
+        print("\n❌ CRITICAL: Failed to get admin token. Cannot proceed with tests.")
+        sys.exit(1)
+    
+    # Run all test scenarios
+    test_scenario_1_auth(token)
+    test_scenario_2_validation(token)
+    created_wrestler_id = test_scenario_3_create(token)
+    test_scenario_4_update_created(token, created_wrestler_id)
+    test_scenario_5_update_seeded(token)
+    test_scenario_6_put_bad_id(token)
+    test_scenario_7_delete(token, created_wrestler_id)
+    test_scenario_8_regression(token)
+    
+    # Print summary
     print("\n" + "=" * 80)
     print("TEST SUMMARY")
     print("=" * 80)
-    passed = sum(test_results)
-    total = len(test_results)
-    print(f"Passed: {passed}/{total} ({100*passed//total}%)")
+    total = test_results["passed"] + test_results["failed"]
+    print(f"Total Tests: {total}")
+    print(f"Passed: {test_results['passed']} ✅")
+    print(f"Failed: {test_results['failed']} ❌")
     
-    if passed == total:
-        print("✅ ALL TESTS PASSED - Promo code expiry feature is working correctly")
-        return True
+    if test_results["failed"] == 0:
+        print("\n🎉 ALL TESTS PASSED! Admin Roster CRUD is production-ready.")
     else:
-        print(f"❌ {total - passed} TEST(S) FAILED")
-        return False
+        print("\n⚠️  SOME TESTS FAILED. Review the output above for details.")
+        print("\nFailed scenarios:")
+        for scenario in test_results["scenarios"]:
+            if not scenario["passed"]:
+                print(f"  - {scenario['scenario']}: {scenario['message']}")
+    
+    print("=" * 80)
+    
+    # Exit with appropriate code
+    sys.exit(0 if test_results["failed"] == 0 else 1)
 
 if __name__ == "__main__":
-    try:
-        success = run_tests()
-        sys.exit(0 if success else 1)
-    except KeyboardInterrupt:
-        print("\n\nTests interrupted by user")
-        sys.exit(1)
-    except Exception as e:
-        print(f"\n\n❌ FATAL ERROR: {str(e)}")
-        import traceback
-        traceback.print_exc()
-        sys.exit(1)
+    main()
